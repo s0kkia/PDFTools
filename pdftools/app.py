@@ -144,7 +144,7 @@ class UpdateDialog(QDialog):
         self.status.setText("Обновление скачано и проверено")
         self.detail.setText(f"Архив сохранён: {archive_path}")
         answer = QMessageBox.question(self, "Установка обновления",
-            f"Архив загружен и SHA256 совпадает.\n\nФайл: {archive_path}\n\nПосле установки программа перезапустится. Продолжить?",
+            f"Архив загружен и SHA256 совпадает.\n\nФайл: {archive_path}\n\nПЕРЕЗАПУСК МОЖЕТ ЗАТЯНУТЬСЯ! НЕ ПУГАЙТЕСЬ — PDFTOOLS НЕ ЗАВИС, А ПРОСТО СОБИРАЕТСЯ С НОВЫМИ СИЛАМИ. 😄\n\nПродолжить?",
             QMessageBox.Yes | QMessageBox.No, QMessageBox.Yes)
         if answer != QMessageBox.Yes:
             updater.cleanup_download(result)
