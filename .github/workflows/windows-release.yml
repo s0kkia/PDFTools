@@ -40,6 +40,16 @@ jobs:
         run: |
           $hash = (Get-FileHash dist/PDFTools.exe -Algorithm SHA256).Hash.ToLower()
           "PDFTools.exe  $hash" | Out-File -Encoding ascii SHA256SUMS.txt
+      - name: Upload build artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: PDFTools-Windows-x64
+          path: |
+            dist/PDFTools.exe
+            PDFTools_2.0_Portable_Windows_x64.zip
+            SHA256SUMS.txt
+          if-no-files-found: error
+          retention-days: 30
       - name: Publish GitHub Release
         if: startsWith(github.ref, 'refs/tags/')
         uses: softprops/action-gh-release@v2
