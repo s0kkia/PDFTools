@@ -140,16 +140,21 @@ class UpdateDialog(QDialog):
             self.close_btn.setEnabled(True)
             return
         self.progress.setValue(100)
+        archive_path = result / updater.PACKAGE_NAME
+        self.status.setText("Обновление скачано и проверено")
+        self.detail.setText(f"Архив сохранён: {archive_path}")
         answer = QMessageBox.question(self, "Установка обновления",
-            "Архив загружен и контрольная сумма совпадает. PDFTools будет закрыт, обновлён и запущен заново. Продолжить?",
+            f"Архив загружен и SHA256 совпадает.\n\nФайл: {archive_path}\n\nПосле установки программа перезапустится. Продолжить?",
             QMessageBox.Yes | QMessageBox.No, QMessageBox.Yes)
         if answer != QMessageBox.Yes:
-            self.status.setText("Обновление загружено, установка отложена.")
-            self.detail.setText(str(result))
+            self.status.setText("Обновление скачано, установка отложена.")
+            self.detail.setText(f"Файл можно найти здесь: {archive_path}")
             self.close_btn.setEnabled(True)
             return
         try:
-            updater.launch_update(result, Path(sys.executable).resolve().parent, os.getpid())
+            log_path = updater.launch_update(result, Path(sys.executable).resolve().parent, os.getpid())
+            self.status.setText("Подготовка установки…")
+            self.detail.setText(f"Программа закроется. Журнал установки: {log_path}")
         except Exception as exc:
             QMessageBox.critical(self, "Ошибка обновления", str(exc))
             self.close_btn.setEnabled(True)
