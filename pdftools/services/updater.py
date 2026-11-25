@@ -135,10 +135,11 @@ try {
         Move-Item -LiteralPath $staged -Destination $install
         if (!(Test-Path (Join-Path $install 'PDFTools.exe'))) { throw 'New executable missing after copy' }
         Start-Process -FilePath (Join-Path $install 'PDFTools.exe')
-        Start-Sleep -Seconds 5
-        if (Get-Process -Name 'PDFTools' -ErrorAction SilentlyContinue) {
-            Remove-Item -LiteralPath $backup -Recurse -Force
+        Start-Sleep -Seconds 8
+        if (!(Get-Process -Name 'PDFTools' -ErrorAction SilentlyContinue)) {
+            throw 'Updated PDFTools process did not remain running; rolling back'
         }
+        Remove-Item -LiteralPath $backup -Recurse -Force
     } catch {
         if (Test-Path $install) { Remove-Item -LiteralPath $install -Recurse -Force }
         if (Test-Path $backup) { Move-Item -LiteralPath $backup -Destination $install }
