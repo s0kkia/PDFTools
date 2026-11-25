@@ -43,7 +43,7 @@ jobs:
       - name: Upload build artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: PDFTools-2.0.2-Windows-x64
+          name: PDFTools-2.0.3-Windows-x64
           path: |
             dist/PDFTools/
             PDFTools_2.0_Windows_x64.zip
