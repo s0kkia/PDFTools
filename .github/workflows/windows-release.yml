@@ -5,6 +5,11 @@ on:
     tags:
       - "v*"
   workflow_dispatch:
+    inputs:
+      release_tag:
+        description: "Тег релиза для публикации (например, v2.0.2). Оставьте пустым для обычной сборки."
+        required: false
+        type: string
 
 permissions:
   contents: write
@@ -15,10 +20,13 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - name: Set application version from release tag
-        if: startsWith(github.ref, 'refs/tags/')
+        if: startsWith(github.ref, 'refs/tags/') || inputs.release_tag != ''
         shell: pwsh
+        env:
+          INPUTS_RELEASE_TAG: ${{ inputs.release_tag }}
         run: |
-          $version = $env:GITHUB_REF_NAME.TrimStart('v')
+          if ($env:INPUTS_RELEASE_TAG) { $tag = $env:INPUTS_RELEASE_TAG } else { $tag = $env:GITHUB_REF_NAME }
+          $version = $tag.TrimStart('v')
           Set-Content -Path pdftools/__init__.py -Value ('__version__ = "' + $version + '"') -Encoding utf8
       - uses: actions/setup-python@v5
         with:
@@ -49,7 +57,7 @@ jobs:
       - name: Upload build artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: PDFTools-${{ github.ref_name }}-Windows-x64
+          name: PDFTools-${{ inputs.release_tag || github.ref_name }}-Windows-x64
           path: |
             dist/PDFTools/
             PDFTools_2.0_Windows_x64.zip
@@ -57,9 +65,10 @@ jobs:
           if-no-files-found: error
           retention-days: 30
       - name: Publish GitHub Release
-        if: startsWith(github.ref, 'refs/tags/')
+        if: startsWith(github.ref, 'refs/tags/') || inputs.release_tag != ''
         uses: softprops/action-gh-release@v2
         with:
+          tag_name: ${{ inputs.release_tag || github.ref_name }}
           generate_release_notes: true
           overwrite_files: true
           files: |
