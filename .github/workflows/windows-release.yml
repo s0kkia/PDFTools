@@ -18,6 +18,13 @@ jobs:
         with:
           python-version: "3.13"
           architecture: "x64"
+      - name: Verify Visual Studio Clang compiler
+        shell: pwsh
+        run: |
+          $vswhere = "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe"
+          if (Test-Path $vswhere) {
+            & $vswhere -latest -products * -requires Microsoft.VisualStudio.Component.VC.Llvm.Clang -property installationPath
+          }
       - name: Install dependencies
         shell: pwsh
         run: |
@@ -26,10 +33,10 @@ jobs:
           pip install "Nuitka[onefile]" pytest ordered-set
       - name: Run tests
         run: python -m pytest -q
-      - name: Build single-file executable with cached extraction
+      - name: Build single-file executable with Clang backend
         shell: pwsh
         run: |
-          python -m nuitka --mode=onefile --enable-plugin=pyside6 --windows-console-mode=disable --output-dir=dist --output-filename=PDFTools.exe --onefile-no-compression --onefile-tempdir-spec="{CACHE_DIR}/PDFTools/1.0.1" --assume-yes-for-downloads main.py
+          python -m nuitka --mode=onefile --clang --jobs=1 --enable-plugin=pyside6 --windows-console-mode=disable --output-dir=dist --output-filename=PDFTools.exe --onefile-no-compression --onefile-tempdir-spec="{CACHE_DIR}/PDFTools/1.0.2" --assume-yes-for-downloads main.py
       - name: Package portable archive
         shell: pwsh
         run: |
