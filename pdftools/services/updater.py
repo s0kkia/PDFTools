@@ -172,6 +172,7 @@ try {
     Write-Log "Application closed. Preparing new version."
 
     Remove-Safe $newInstall
+    Remove-Safe $oldInstall
     New-Item -ItemType Directory -Path $newInstall -Force | Out-Null
     Copy-Item -Path (Join-Path $staged '*') -Destination $newInstall -Recurse -Force
     if (!(Test-Path -LiteralPath (Join-Path $newInstall 'PDFTools.exe'))) {
