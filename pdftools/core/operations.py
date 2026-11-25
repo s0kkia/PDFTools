@@ -1,5 +1,6 @@
 from __future__ import annotations
 from pathlib import Path
+import os
 from typing import Iterable
 import pymupdf as fitz
 from pypdf import PdfReader, PdfWriter
@@ -165,21 +166,46 @@ def extract_tables(source: str | Path, output_dir: str | Path) -> list[Path]:
     return outputs
 
 
+def _unicode_font_path() -> Path | None:
+    """Find a system font with Cyrillic glyphs for embedding into the output PDF."""
+    candidates = [
+        Path(os.environ.get("WINDIR", r"C:\Windows")) / "Fonts" / "arial.ttf",
+        Path(os.environ.get("WINDIR", r"C:\Windows")) / "Fonts" / "segoeui.ttf",
+        Path("/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf"),
+        Path("/usr/share/fonts/truetype/liberation2/LiberationSans-Regular.ttf"),
+        Path("/System/Library/Fonts/Supplemental/Arial.ttf"),
+    ]
+    return next((path for path in candidates if path.is_file()), None)
+
+
 def add_text_watermark(source: str | Path, output: str | Path, text: str,
                        opacity: float = 0.22, fontsize: float = 48,
                        rotation: int = 45, color: tuple[float, float, float] = (0.55, 0.55, 0.55)) -> Path:
-    """Adds a centered diagonal text watermark to every page."""
+    """Adds a centered diagonal text watermark; embeds a Unicode font for Cyrillic text."""
     src, dst = Path(source), Path(output)
     if not text.strip():
         raise ValueError("Текст водяного знака не может быть пустым")
     opacity = max(0.05, min(float(opacity), 1.0))
+    fontsize = float(fontsize)
+    if fontsize <= 0:
+        raise ValueError("Размер шрифта должен быть больше нуля")
     dst.parent.mkdir(parents=True, exist_ok=True)
+
+    font_path = _unicode_font_path() if any(ord(char) > 127 for char in text) else None
+    if any(ord(char) > 127 for char in text) and font_path is None:
+        raise RuntimeError("Для кириллического водяного знака не найден системный Unicode-шрифт (например, Arial).")
+
     with fitz.open(src) as doc:
         for page in doc:
             rect = page.rect
             point = fitz.Point(rect.width / 2 - fontsize, rect.height / 2)
-            page.insert_text(point, text, fontsize=fontsize, fontname="helv",
-                             color=color, fill_opacity=opacity, rotate=rotation,
-                             overlay=True)
+            if font_path:
+                page.insert_text(point, text, fontsize=fontsize, fontname="PDFToolsUnicode",
+                                 fontfile=str(font_path), color=color, fill_opacity=opacity,
+                                 rotate=rotation, overlay=True)
+            else:
+                page.insert_text(point, text, fontsize=fontsize, fontname="helv",
+                                 color=color, fill_opacity=opacity, rotate=rotation,
+                                 overlay=True)
         doc.save(dst, garbage=4, deflate=True)
     return dst
