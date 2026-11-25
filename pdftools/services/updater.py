@@ -51,6 +51,14 @@ def _updates_root() -> Path:
     return base / "PDFTools" / "Updates"
 
 
+def _write_update_log(message: str) -> None:
+    """Write diagnostics outside the temporary download folder."""
+    root = _updates_root()
+    root.mkdir(parents=True, exist_ok=True)
+    with (root / "update.log").open("a", encoding="utf-8") as stream:
+        stream.write(f"{datetime.now().isoformat(timespec='seconds')} {message}\\n")
+
+
 def _download(url: str, destination: Path, progress=None, timeout: int = 60) -> Path:
     request = Request(url, headers={"User-Agent": USER_AGENT, "Accept": "application/octet-stream"})
     destination.parent.mkdir(parents=True, exist_ok=True)
@@ -81,10 +89,15 @@ def download_and_verify(release: dict, progress=None) -> Path:
     stamp = datetime.now().strftime("%Y%m%d-%H%M%S")
     work = _updates_root() / f"{version}-{stamp}"
     work.mkdir(parents=True, exist_ok=False)
+    _write_update_log(f"Начата загрузка обновления {release.get('tag_name', version)}; рабочая папка: {work}")
     archive = work / PACKAGE_NAME
     checksum_file = work / CHECKSUM_NAME
-    _download(package.get("browser_download_url") or package["url"], archive, progress)
-    _download(checksum_asset.get("browser_download_url") or checksum_asset["url"], checksum_file)
+    try:
+        _download(package.get("browser_download_url") or package["url"], archive, progress)
+        _download(checksum_asset.get("browser_download_url") or checksum_asset["url"], checksum_file)
+    except Exception as exc:
+        _write_update_log(f"ОШИБКА загрузки: {exc}; файлы оставлены: {work}")
+        raise
 
     expected = None
     for line in checksum_file.read_text(encoding="utf-8-sig").splitlines():
@@ -93,7 +106,9 @@ def download_and_verify(release: dict, progress=None) -> Path:
             expected = parts[0].lower()
             break
     if not expected or sha256(archive) != expected:
+        _write_update_log(f"ОШИБКА SHA256; файлы оставлены: {work}")
         raise RuntimeError(f"Контрольная сумма ZIP не совпадает. Файлы оставлены для диагностики: {work}")
+    _write_update_log(f"Загрузка {version} завершена; SHA256 проверена; архив: {archive}")
 
     extracted = work / "extracted"
     extracted.mkdir()
@@ -107,7 +122,9 @@ def download_and_verify(release: dict, progress=None) -> Path:
 
     app_folder = extracted / "PDFTools"
     if not (app_folder / "PDFTools.exe").is_file():
+        _write_update_log(f"ОШИБКА: в архиве отсутствует PDFTools.exe; архив: {archive}")
         raise RuntimeError(f"В архиве не найдена PDFTools/PDFTools.exe. Архив сохранён: {archive}")
+    _write_update_log(f"Архив распакован; подготовлено к установке: {app_folder}")
     return work
 
 
@@ -131,7 +148,9 @@ def launch_update(work: Path, install_dir: Path, process_id: int) -> Path:
     if work.parent != updates_root:
         raise RuntimeError("Папка обновления находится вне разрешённого каталога.")
     if not (install_dir / "PDFTools.exe").is_file() or not (staged / "PDFTools.exe").is_file():
+        _write_update_log(f"ОШИБКА: не найдена текущая или новая PDFTools.exe; install={install_dir}; staged={staged}")
         raise RuntimeError("Не найдена текущая или новая версия PDFTools.exe.")
+    _write_update_log(f"Запрошена установка; PID={process_id}; каталог программы: {install_dir}")
 
     updates_root.mkdir(parents=True, exist_ok=True)
     log = updates_root / "update.log"
@@ -225,8 +244,8 @@ catch {
             Write-Log "Previous version restarted."
         }
         Remove-Safe $newInstall
+        # Keep the downloaded archive and installer script after failure for diagnostics.
         Set-Location $env:TEMP
-        Remove-Safe $work
     }
     catch {
         Write-Log "ROLLBACK ERROR: $_"
@@ -248,6 +267,7 @@ catch {
     script.write_text(ps, encoding="utf-8")
     import base64
     encoded = base64.b64encode(ps.encode("utf-16le")).decode("ascii")
+    _write_update_log(f"Запускается установщик PowerShell; скрипт: {script}; журнал: {log}")
     subprocess.Popen(
         ["powershell.exe", "-NoProfile", "-ExecutionPolicy", "Bypass", "-EncodedCommand", encoded],
         cwd=str(work),
