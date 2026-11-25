@@ -81,16 +81,9 @@ def download_and_verify(release: dict, progress=None) -> Path:
     expected = None
     for line in checksum_file.read_text(encoding="utf-8-sig").splitlines():
         parts = line.strip().split()
-        if len(parts) >= 2 and parts[-1].lower() == "pdfTools/pdfTools.exe".lower():
+        if len(parts) >= 2 and parts[-1].strip("*").lower() == PACKAGE_NAME.lower():
             expected = parts[0].lower()
             break
-    if not expected:
-        # Accept the standard generated checksum line with filename after hash.
-        for line in checksum_file.read_text(encoding="utf-8-sig").splitlines():
-            parts = line.strip().split()
-            if len(parts) >= 2 and "PDFTools.exe" in parts[-1]:
-                expected = parts[0].lower()
-                break
     if not expected or sha256(archive) != expected:
         shutil.rmtree(work, ignore_errors=True)
         raise RuntimeError("Контрольная сумма ZIP не совпадает. Установка отменена.")
