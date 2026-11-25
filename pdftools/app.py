@@ -147,8 +147,9 @@ class UpdateDialog(QDialog):
             f"Архив загружен и SHA256 совпадает.\n\nФайл: {archive_path}\n\nПосле установки программа перезапустится. Продолжить?",
             QMessageBox.Yes | QMessageBox.No, QMessageBox.Yes)
         if answer != QMessageBox.Yes:
-            self.status.setText("Обновление скачано, установка отложена.")
-            self.detail.setText(f"Файл можно найти здесь: {archive_path}")
+            updater.cleanup_download(result)
+            self.status.setText("Установка отменена. Временные файлы удалены.")
+            self.detail.setText("Архив и распакованные файлы удалены. Журнал предыдущих обновлений сохранён.")
             self.close_btn.setEnabled(True)
             return
         try:
