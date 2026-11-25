@@ -23,29 +23,31 @@ jobs:
         run: |
           python -m pip install --upgrade pip
           pip install -r requirements.txt
-          pip install pyinstaller pytest
+          pip install "Nuitka[onefile]" pytest ordered-set
       - name: Run tests
         run: python -m pytest -q
-      - name: Build executable (onedir for faster startup)
-        run: pyinstaller --noconfirm --clean --windowed --onedir --name PDFTools main.py
+      - name: Build single-file executable with cached extraction
+        shell: pwsh
+        run: |
+          python -m nuitka --mode=onefile --enable-plugin=pyside6 --windows-console-mode=disable --output-dir=dist --output-filename=PDFTools.exe --onefile-no-compression --onefile-tempdir-spec="{CACHE_DIR}/PDFTools/1.0.1" --assume-yes-for-downloads main.py
       - name: Package portable archive
         shell: pwsh
         run: |
           New-Item -ItemType Directory -Force release | Out-Null
-          Copy-Item -Recurse dist/PDFTools release/PDFTools
+          Copy-Item dist/PDFTools.exe release/PDFTools.exe
           Copy-Item README.md release/README.txt
           Compress-Archive -Path release/* -DestinationPath PDFTools_Portable_Windows_x64.zip
       - name: Generate checksum
         shell: pwsh
         run: |
-          $hash = (Get-FileHash dist/PDFTools/PDFTools.exe -Algorithm SHA256).Hash.ToLower()
+          $hash = (Get-FileHash dist/PDFTools.exe -Algorithm SHA256).Hash.ToLower()
           "PDFTools.exe  $hash" | Out-File -Encoding ascii SHA256SUMS.txt
       - name: Upload build artifacts
         uses: actions/upload-artifact@v4
         with:
           name: PDFTools-Windows-x64
           path: |
-            dist/PDFTools/
+            dist/PDFTools.exe
             PDFTools_Portable_Windows_x64.zip
             SHA256SUMS.txt
           if-no-files-found: error
@@ -56,5 +58,6 @@ jobs:
         with:
           generate_release_notes: true
           files: |
+            dist/PDFTools.exe
             PDFTools_Portable_Windows_x64.zip
             SHA256SUMS.txt
