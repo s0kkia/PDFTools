@@ -28,7 +28,12 @@ def split_pdf(source: str | Path, output_dir: str | Path) -> list[Path]:
         for index in range(doc.page_count):
             part = fitz.open()
             part.insert_pdf(doc, from_page=index, to_page=index)
-            target = outdir / f"{src.stem}_page_{index + 1:04d}.pdf"
+            base = outdir / f"{src.stem}_page_{index + 1:04d}.pdf"
+            target = base
+            suffix = 2
+            while target.exists():
+                target = base.with_name(f"{base.stem}_{suffix}{base.suffix}")
+                suffix += 1
             part.save(target, garbage=4, deflate=True)
             part.close()
             outputs.append(target)
