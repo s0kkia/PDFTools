@@ -1,6 +1,7 @@
 from __future__ import annotations
 import sys
 import shutil
+import os
 from pathlib import Path
 from PySide6.QtCore import Qt, QThread, Signal, QSize, QPointF
 from PySide6.QtGui import QPixmap, QImage, QIcon, QPainter
@@ -39,11 +40,28 @@ class Job(QThread):
             self.finished_one.emit(exc)
 
 
+class UpdateDownloadJob(QThread):
+    progress = Signal(int, int)
+    finished_one = Signal(object)
+
+    def __init__(self, release):
+        super().__init__()
+        self.release = release
+
+    def run(self):
+        try:
+            result = updater.download_and_verify(self.release,
+                lambda received, total: self.progress.emit(received, total))
+            self.finished_one.emit(result)
+        except Exception as exc:
+            self.finished_one.emit(exc)
+
+
 class UpdateDialog(QDialog):
     def __init__(self, parent=None):
         super().__init__(parent)
         self.setWindowTitle("Обновление PDFTools")
-        self.setMinimumWidth(440)
+        self.setMinimumWidth(480)
         layout = QVBoxLayout(self)
         self.status = QLabel("Проверка доступной версии…")
         self.progress = QProgressBar()
@@ -53,7 +71,15 @@ class UpdateDialog(QDialog):
         layout.addWidget(self.status)
         layout.addWidget(self.progress)
         layout.addWidget(self.detail)
+        self.action_btn = QPushButton("Скачать и установить")
+        self.action_btn.setEnabled(False)
+        self.action_btn.clicked.connect(self.download_update)
+        layout.addWidget(self.action_btn)
+        self.close_btn = QPushButton("Закрыть")
+        self.close_btn.clicked.connect(self.reject)
+        layout.addWidget(self.close_btn)
         self.release = None
+        self.download_job = None
         self.worker = Job(updater.latest_release)
         self.worker.finished_one.connect(self.on_release)
         self.worker.start()
@@ -64,17 +90,66 @@ class UpdateDialog(QDialog):
             self.detail.setText(str(result))
             return
         self.release = result
-        tag = result.get("tag_name", "")
-        self.status.setText(f"Последняя опубликованная версия: {tag}")
-        assets = result.get("assets", [])
-        installers = [a for a in assets if a.get("name", "").lower().endswith((".exe", ".msi"))]
-        if not installers:
-            self.detail.setText("Релиз найден, но установочный EXE/MSI пока не приложен.")
+        latest = result.get("tag_name", "").lstrip("v")
+        current = __version__.lstrip("v")
+        self.status.setText(f"Установленная версия: {__version__} · Последняя версия: {result.get('tag_name', 'неизвестно')}")
+        if not updater.is_newer(latest, current):
+            self.detail.setText("У вас установлена последняя версия PDFTools.")
+            self.action_btn.setVisible(False)
+            self.progress.setValue(100)
             return
-        self.asset = installers[0]
-        self.detail.setText(f"Найден установщик: {self.asset['name']}")
+        assets = {a.get("name"): a for a in result.get("assets", [])}
+        if updater.PACKAGE_NAME not in assets or updater.CHECKSUM_NAME not in assets:
+            self.detail.setText("Релиз найден, но в нём отсутствует архив программы или файл контрольной суммы.")
+            return
+        self.detail.setText("Доступно обновление. Настройки, история и библиотека штампов сохраняются.")
+        self.action_btn.setEnabled(True)
+
+    def download_update(self):
+        if not self.release:
+            return
+        self.action_btn.setEnabled(False)
+        self.close_btn.setEnabled(False)
+        self.status.setText("Загрузка обновления…")
+        self.detail.setText("Загрузка архива и проверка SHA256.")
+        self.progress.setRange(0, 100)
+        self.download_job = UpdateDownloadJob(self.release)
+        self.download_job.progress.connect(self.on_download_progress)
+        self.download_job.finished_one.connect(self.on_download_finished)
+        self.download_job.start()
+
+    def on_download_progress(self, received, total):
+        if total > 0:
+            self.progress.setValue(int(received * 100 / total))
+            self.detail.setText(f"Загружено {received / 1024 / 1024:.1f} из {total / 1024 / 1024:.1f} МБ")
+        else:
+            self.progress.setRange(0, 0)
+            self.detail.setText(f"Загружено {received / 1024 / 1024:.1f} МБ")
+
+    def on_download_finished(self, result):
+        if isinstance(result, Exception):
+            self.status.setText("Не удалось загрузить обновление")
+            self.detail.setText(str(result))
+            self.action_btn.setEnabled(True)
+            self.close_btn.setEnabled(True)
+            return
         self.progress.setValue(100)
-        self.status.setText("Обновление доступно. Скачивание и запуск установщика будут добавлены в следующем релизном цикле.")
+        answer = QMessageBox.question(self, "Установка обновления",
+            "Архив загружен и контрольная сумма совпадает. PDFTools будет закрыт, обновлён и запущен заново. Продолжить?",
+            QMessageBox.Yes | QMessageBox.No, QMessageBox.Yes)
+        if answer != QMessageBox.Yes:
+            self.status.setText("Обновление загружено, установка отложена.")
+            self.detail.setText(str(result))
+            self.close_btn.setEnabled(True)
+            return
+        try:
+            updater.launch_update(result, Path(sys.executable).resolve().parent, os.getpid())
+        except Exception as exc:
+            QMessageBox.critical(self, "Ошибка обновления", str(exc))
+            self.close_btn.setEnabled(True)
+            return
+        self.accept()
+        QApplication.quit()
 
 
 class StampGraphicsView(QGraphicsView):
