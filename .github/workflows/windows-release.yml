@@ -43,7 +43,7 @@ jobs:
       - name: Upload build artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: PDFTools-2.0.3-Windows-x64
+          name: PDFTools-${{ github.ref_name }}-Windows-x64
           path: |
             dist/PDFTools/
             PDFTools_2.0_Windows_x64.zip
@@ -55,6 +55,7 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           generate_release_notes: true
+          overwrite_files: true
           files: |
             PDFTools_2.0_Windows_x64.zip
             SHA256SUMS.txt
