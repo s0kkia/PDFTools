@@ -172,7 +172,17 @@ $work = '__WORK__'
 $log = '__LOG__'
 
 function Write-Log($message) {
-    "$(Get-Date -Format o) $message" | Out-File -FilePath $log -Append -Encoding utf8
+    $line = "$(Get-Date -Format o) $message"
+    # Logging must never interrupt installation if another process briefly holds the log.
+    for ($attempt = 0; $attempt -lt 8; $attempt++) {
+        try {
+            Add-Content -LiteralPath $log -Value $line -Encoding UTF8 -ErrorAction Stop
+            return
+        }
+        catch {
+            Start-Sleep -Milliseconds 250
+        }
+    }
 }
 function Remove-Safe($path) {
     if (Test-Path -LiteralPath $path) {
@@ -221,12 +231,21 @@ try {
     $oldMoved = $false
     Write-Log "Previous version saved at $previous. Older backup discarded."
 
+    # Cleanup is best-effort and must never close a successfully started application.
     Set-Location $env:TEMP
-    Remove-Safe $work
-    Get-ChildItem -LiteralPath $updatesRoot -Force |
-        Where-Object { $_.Name -notin @('PreviousVersion', 'update.log') } |
-        ForEach-Object { Remove-Item -LiteralPath $_.FullName -Recurse -Force }
-    Write-Log "Update completed. Temporary files cleaned."
+    try {
+        Remove-Safe $work
+        Get-ChildItem -LiteralPath $updatesRoot -Force |
+            Where-Object { $_.Name -notin @('PreviousVersion', 'update.log') } |
+            ForEach-Object {
+                try { Remove-Item -LiteralPath $_.FullName -Recurse -Force -ErrorAction Stop }
+                catch { Write-Log "WARNING: temporary folder retained for later cleanup: $($_.FullName); $_" }
+            }
+        Write-Log "Update completed. Temporary cleanup finished."
+    }
+    catch {
+        Write-Log "WARNING: update installed and running, but temporary cleanup was deferred: $_"
+    }
 }
 catch {
     Write-Log "UPDATE ERROR: $_"
