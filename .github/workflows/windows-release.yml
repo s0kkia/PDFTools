@@ -18,30 +18,21 @@ jobs:
         with:
           python-version: "3.13"
           architecture: "x64"
-      - name: Verify Visual Studio Clang compiler
-        shell: pwsh
-        run: |
-          $vswhere = "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe"
-          if (Test-Path $vswhere) {
-            & $vswhere -latest -products * -requires Microsoft.VisualStudio.Component.VC.Llvm.Clang -property installationPath
-          }
       - name: Install dependencies
         shell: pwsh
         run: |
           python -m pip install --upgrade pip
           pip install -r requirements.txt
-          pip install "Nuitka[onefile]" pytest ordered-set
+          pip install pyinstaller pytest
       - name: Run tests
         run: python -m pytest -q
-      - name: Build single-file executable with Clang backend
-        shell: pwsh
-        run: |
-          python -m nuitka --mode=onefile --clang --jobs=1 --enable-plugin=pyside6 --windows-console-mode=disable --output-dir=dist --output-filename=PDFTools.exe --onefile-no-compression --onefile-tempdir-spec="{CACHE_DIR}/PDFTools/1.0.2" --assume-yes-for-downloads main.py
+      - name: Build executable (PyInstaller one-file)
+        run: pyinstaller --noconfirm --clean --windowed --onefile --name PDFTools main.py
       - name: Package portable archive
         shell: pwsh
         run: |
           New-Item -ItemType Directory -Force release | Out-Null
-          Copy-Item dist/PDFTools.exe release/PDFTools.exe
+          Copy-Item dist/PDFTools.exe release/
           Copy-Item README.md release/README.txt
           Compress-Archive -Path release/* -DestinationPath PDFTools_Portable_Windows_x64.zip
       - name: Generate checksum
