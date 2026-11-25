@@ -23,6 +23,12 @@ from pdftools.services.data_paths import data_dir
 from pdftools.ui.theme import DARK_QSS
 
 
+def resource_path(relative_path: str) -> str:
+    """Resolve bundled resources in development and PyInstaller builds."""
+    base = Path(getattr(sys, "_MEIPASS", Path(__file__).resolve().parent.parent))
+    return str(base / relative_path)
+
+
 class Job(QThread):
     progress = Signal(int, int)
     log = Signal(str)
@@ -574,6 +580,7 @@ class MainWindow(QMainWindow):
     def __init__(self):
         super().__init__()
         self.setWindowTitle(f"PDFTools {__version__}")
+        self.setWindowIcon(QIcon(resource_path("PDFTools.ico")))
         self.resize(1280, 820)
         self.history = HistoryStore()
         self.job = None
