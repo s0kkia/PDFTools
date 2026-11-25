@@ -111,67 +111,135 @@ def download_and_verify(release: dict, progress=None) -> Path:
     return work
 
 
+def cleanup_download(work: Path) -> None:
+    """Remove a downloaded/staged update when the user cancels installation."""
+    work = work.resolve()
+    root = _updates_root().resolve()
+    if work.parent == root and work.name not in {"PreviousVersion", "PreviousVersion.new"}:
+        shutil.rmtree(work, ignore_errors=True)
+
+
 def launch_update(work: Path, install_dir: Path, process_id: int) -> Path:
+    """Install a verified update, retaining exactly one previous application version."""
     if os.name != "nt":
         raise RuntimeError("Автоматическая установка доступна только в Windows.")
+
+    work = work.resolve()
+    updates_root = _updates_root().resolve()
     install_dir = install_dir.resolve()
     staged = (work / "extracted" / "PDFTools").resolve()
+    if work.parent != updates_root:
+        raise RuntimeError("Папка обновления находится вне разрешённого каталога.")
     if not (install_dir / "PDFTools.exe").is_file() or not (staged / "PDFTools.exe").is_file():
         raise RuntimeError("Не найдена текущая или новая версия PDFTools.exe.")
 
-    backup = install_dir.with_name(install_dir.name + ".backup-" + datetime.now().strftime("%Y%m%d-%H%M%S"))
-    log = work / "update.log"
+    updates_root.mkdir(parents=True, exist_ok=True)
+    log = updates_root / "update.log"
     script = work / "install_update.ps1"
+    previous = updates_root / "PreviousVersion"
+    old_install = install_dir.with_name(install_dir.name + ".update-previous")
+    new_install = install_dir.with_name(install_dir.name + ".update-new")
+
     ps = r"""
 $ErrorActionPreference = 'Stop'
 $pidToWait = __PID__
 $install = '__INSTALL__'
 $staged = '__STAGED__'
-$backup = '__BACKUP__'
+$updatesRoot = '__UPDATES_ROOT__'
+$previous = Join-Path $updatesRoot 'PreviousVersion'
+$oldInstall = '__OLD_INSTALL__'
+$newInstall = '__NEW_INSTALL__'
+$work = '__WORK__'
 $log = '__LOG__'
+
 function Write-Log($message) {
     "$(Get-Date -Format o) $message" | Out-File -FilePath $log -Append -Encoding utf8
 }
+function Remove-Safe($path) {
+    if (Test-Path -LiteralPath $path) {
+        Remove-Item -LiteralPath $path -Recurse -Force
+    }
+}
+
+$oldMoved = $false
+$newStarted = $false
 try {
-    Write-Log "Updater started. Waiting for PDFTools process $pidToWait."
+    Write-Log "------------------------------------------------------------"
+    Write-Log "Update started. Waiting for PDFTools PID $pidToWait."
     while (Get-Process -Id $pidToWait -ErrorAction SilentlyContinue) {
         Start-Sleep -Seconds 1
     }
-    Write-Log "Main application closed."
-    Move-Item -LiteralPath $install -Destination $backup
-    Write-Log "Previous version moved to backup: $backup"
-    try {
-        New-Item -ItemType Directory -Path $install -Force | Out-Null
-        Copy-Item -Path (Join-Path $staged '*') -Destination $install -Recurse -Force
-        $newExe = Join-Path $install 'PDFTools.exe'
-        if (!(Test-Path -LiteralPath $newExe)) { throw "New executable missing after copy." }
-        Write-Log "New files copied. Starting updated application."
-        Start-Process -FilePath $newExe -WorkingDirectory $install
-        Start-Sleep -Seconds 15
-        if (!(Get-Process -Name 'PDFTools' -ErrorAction SilentlyContinue)) {
-            throw "Updated application did not remain running."
-        }
-        Write-Log "Updated application started successfully. Backup retained at $backup"
-    } catch {
-        Write-Log "Installation failed: $_. Rolling back."
-        if (Test-Path -LiteralPath $install) {
-            Remove-Item -LiteralPath $install -Recurse -Force
-        }
-        if (Test-Path -LiteralPath $backup) {
-            Move-Item -LiteralPath $backup -Destination $install
-        }
-        Start-Process -FilePath (Join-Path $install 'PDFTools.exe') -WorkingDirectory $install
-        Write-Log "Rollback completed."
+    Write-Log "Application closed. Preparing new version."
+
+    Remove-Safe $newInstall
+    New-Item -ItemType Directory -Path $newInstall -Force | Out-Null
+    Copy-Item -Path (Join-Path $staged '*') -Destination $newInstall -Recurse -Force
+    if (!(Test-Path -LiteralPath (Join-Path $newInstall 'PDFTools.exe'))) {
+        throw "Staged executable missing."
     }
-} catch {
-    Write-Log "Updater fatal error: $_"
+    Write-Log "New version staged."
+
+    Move-Item -LiteralPath $install -Destination $oldInstall
+    $oldMoved = $true
+    Write-Log "Current version moved temporarily: $oldInstall"
+
+    Move-Item -LiteralPath $newInstall -Destination $install
+    Write-Log "New version installed."
+
+    $newProcess = Start-Process -FilePath (Join-Path $install 'PDFTools.exe') -WorkingDirectory $install -PassThru
+    Start-Sleep -Seconds 15
+    $newProcess.Refresh()
+    if ($newProcess.HasExited) {
+        throw "New PDFTools process exited during startup (code $($newProcess.ExitCode))."
+    }
+    $newStarted = $true
+    Write-Log "New version started successfully (PID $($newProcess.Id))."
+
+    # Replace the previous backup only after the new version is confirmed running.
+    Remove-Safe $previous
+    Move-Item -LiteralPath $oldInstall -Destination $previous
+    $oldMoved = $false
+    Write-Log "Previous version saved at $previous. Older backup discarded."
+
+    Set-Location $env:TEMP
+    Remove-Safe $work
+    Get-ChildItem -LiteralPath $updatesRoot -Force |
+        Where-Object { $_.Name -notin @('PreviousVersion', 'update.log') } |
+        ForEach-Object { Remove-Item -LiteralPath $_.FullName -Recurse -Force }
+    Write-Log "Update completed. Temporary files cleaned."
+}
+catch {
+    Write-Log "UPDATE ERROR: $_"
+    try {
+        if ($newStarted) {
+            Get-Process -Name 'PDFTools' -ErrorAction SilentlyContinue |
+                Stop-Process -Force -ErrorAction SilentlyContinue
+            Start-Sleep -Seconds 2
+        }
+        if ($oldMoved -and (Test-Path -LiteralPath $oldInstall)) {
+            Remove-Safe $install
+            Move-Item -LiteralPath $oldInstall -Destination $install
+            Write-Log "Previous running version restored."
+            Start-Process -FilePath (Join-Path $install 'PDFTools.exe') -WorkingDirectory $install
+            Write-Log "Previous version restarted."
+        }
+        Remove-Safe $newInstall
+        Set-Location $env:TEMP
+        Remove-Safe $work
+    }
+    catch {
+        Write-Log "ROLLBACK ERROR: $_"
+    }
 }
 """
     replacements = {
         "__PID__": str(int(process_id)),
         "__INSTALL__": str(install_dir),
         "__STAGED__": str(staged),
-        "__BACKUP__": str(backup),
+        "__UPDATES_ROOT__": str(updates_root),
+        "__OLD_INSTALL__": str(old_install),
+        "__NEW_INSTALL__": str(new_install),
+        "__WORK__": str(work),
         "__LOG__": str(log),
     }
     for key, value in replacements.items():
