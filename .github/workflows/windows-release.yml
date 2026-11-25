@@ -38,8 +38,8 @@ jobs:
       - name: Generate checksum
         shell: pwsh
         run: |
-          $hash = (Get-FileHash dist/PDFTools/PDFTools.exe -Algorithm SHA256).Hash.ToLower()
-          "PDFTools/PDFTools.exe  $hash" | Out-File -Encoding ascii SHA256SUMS.txt
+          $hash = (Get-FileHash PDFTools_2.0_Windows_x64.zip -Algorithm SHA256).Hash.ToLower()
+          "$hash  PDFTools_2.0_Windows_x64.zip" | Out-File -Encoding ascii SHA256SUMS.txt
       - name: Upload build artifacts
         uses: actions/upload-artifact@v4
         with:
