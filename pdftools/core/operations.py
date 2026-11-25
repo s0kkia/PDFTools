@@ -207,10 +207,10 @@ def add_text_watermark(source: str | Path, output: str | Path, text: str,
             if font_path:
                 page.insert_text(point, text, fontsize=fontsize, fontname="PDFToolsUnicode",
                                  fontfile=str(font_path), color=color, fill_opacity=opacity,
-                                 rotate=rotation, overlay=True)
+                                 morph=(point, fitz.Matrix(rotation)), overlay=True)
             else:
                 page.insert_text(point, text, fontsize=fontsize, fontname="helv",
-                                 color=color, fill_opacity=opacity, rotate=rotation,
-                                 overlay=True)
+                                 color=color, fill_opacity=opacity,
+                                 morph=(point, fitz.Matrix(rotation)), overlay=True)
         doc.save(dst, garbage=4, deflate=True)
     return dst
