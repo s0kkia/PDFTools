@@ -34,19 +34,19 @@ jobs:
           New-Item -ItemType Directory -Force release/PDFTools | Out-Null
           Copy-Item -Recurse dist/PDFTools/* release/PDFTools/
           Copy-Item README.md release/README.txt
-          Compress-Archive -Path release/* -DestinationPath PDFTools_2.0.2_Windows_x64.zip
+          Compress-Archive -Path release/* -DestinationPath PDFTools_2.0_Windows_x64.zip
       - name: Generate checksum
         shell: pwsh
         run: |
-          $hash = (Get-FileHash PDFTools_2.0.2_Windows_x64.zip -Algorithm SHA256).Hash.ToLower()
-          "$hash  PDFTools_2.0.2_Windows_x64.zip" | Out-File -Encoding ascii SHA256SUMS.txt
+          $hash = (Get-FileHash PDFTools_2.0_Windows_x64.zip -Algorithm SHA256).Hash.ToLower()
+          "$hash  PDFTools_2.0_Windows_x64.zip" | Out-File -Encoding ascii SHA256SUMS.txt
       - name: Upload build artifacts
         uses: actions/upload-artifact@v4
         with:
           name: PDFTools-2.0.2-Windows-x64
           path: |
             dist/PDFTools/
-            PDFTools_2.0.2_Windows_x64.zip
+            PDFTools_2.0_Windows_x64.zip
             SHA256SUMS.txt
           if-no-files-found: error
           retention-days: 30
@@ -56,5 +56,5 @@ jobs:
         with:
           generate_release_notes: true
           files: |
-            PDFTools_2.0.2_Windows_x64.zip
+            PDFTools_2.0_Windows_x64.zip
             SHA256SUMS.txt
