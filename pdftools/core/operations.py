@@ -2,7 +2,6 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Iterable
 import pymupdf as fitz
-import pikepdf
 from pypdf import PdfReader, PdfWriter
 
 
@@ -37,22 +36,6 @@ def split_pdf(source: str | Path, output_dir: str | Path) -> list[Path]:
     return outputs
 
 
-def compress_pdf(source: str | Path, output: str | Path, level: str = "balanced") -> Path:
-    src, dst = Path(source), Path(output)
-    dst.parent.mkdir(parents=True, exist_ok=True)
-    if level not in {"light", "balanced", "strong"}:
-        raise ValueError("Уровень сжатия должен быть light, balanced или strong")
-    with pikepdf.open(src) as pdf:
-        if level == "light":
-            pdf.save(dst, compress_streams=True)
-        elif level == "balanced":
-            pdf.save(dst, compress_streams=True, recompress_flate=True, object_stream_mode=pikepdf.ObjectStreamMode.generate)
-        else:
-            pdf.save(dst, compress_streams=True, recompress_flate=True,
-                     object_stream_mode=pikepdf.ObjectStreamMode.generate, linearize=True)
-    return dst
-
-
 def set_metadata(source: str | Path, output: str | Path, metadata: dict[str, str]) -> Path:
     src, dst = Path(source), Path(output)
     dst.parent.mkdir(parents=True, exist_ok=True)
@@ -83,30 +66,68 @@ def add_image_stamp(source: str | Path, image: str | Path, output: str | Path,
 
 def compare_pdfs(left: str | Path, right: str | Path, output_dir: str | Path,
                  dpi: int = 120) -> list[Path]:
-    """Creates visual difference PNGs for matching page indexes."""
-    a, b = fitz.open(left), fitz.open(right)
+    """Render a visible three-panel comparison: source A, source B, highlighted differences."""
+    from PIL import Image, ImageChops, ImageEnhance, ImageDraw
+
     outdir = Path(output_dir)
     outdir.mkdir(parents=True, exist_ok=True)
-    outputs = []
-    try:
-        for i in range(min(a.page_count, b.page_count)):
-            pa = a[i].get_pixmap(matrix=fitz.Matrix(dpi / 72, dpi / 72), alpha=False)
-            pb = b[i].get_pixmap(matrix=fitz.Matrix(dpi / 72, dpi / 72), alpha=False)
-            # Normalize render dimensions before pixel comparison.
-            from PIL import Image, ImageChops
-            ia = Image.frombytes("RGB", (pa.width, pa.height), pa.samples)
-            ib = Image.frombytes("RGB", (pb.width, pb.height), pb.samples)
-            if ib.size != ia.size:
-                ib = ib.resize(ia.size)
-            diff = ImageChops.difference(ia, ib)
-            target = outdir / f"diff_page_{i + 1:04d}.png"
-            diff.save(target)
-            outputs.append(target)
-        return outputs
-    finally:
-        a.close()
-        b.close()
+    outputs: list[Path] = []
 
+    with fitz.open(left) as a, fitz.open(right) as b:
+        page_total = max(a.page_count, b.page_count)
+        scale = dpi / 72
+        for i in range(page_total):
+            images = []
+            for doc in (a, b):
+                if i < doc.page_count:
+                    page = doc[i]
+                    pix = page.get_pixmap(matrix=fitz.Matrix(scale, scale), alpha=False, colorspace=fitz.csRGB)
+                    image = Image.frombytes("RGB", (pix.width, pix.height), pix.samples)
+                else:
+                    image = None
+                images.append(image)
+
+            ia, ib = images
+            if ia is None and ib is None:
+                continue
+            width = max(ia.width if ia else 0, ib.width if ib else 0)
+            height = max(ia.height if ia else 0, ib.height if ib else 0)
+
+            def fit_page(image):
+                canvas = Image.new("RGB", (width, height), "white")
+                if image is not None:
+                    canvas.paste(image, (0, 0))
+                return canvas
+
+            ia, ib = fit_page(ia), fit_page(ib)
+            diff = ImageChops.difference(ia, ib)
+            # Increase visibility of small changes and tint them red.
+            diff = ImageEnhance.Contrast(diff).enhance(3.0)
+            mask = diff.convert("L").point(lambda value: 255 if value > 24 else 0)
+            highlighted = ia.copy()
+            red_layer = Image.new("RGB", (width, height), (255, 40, 40))
+            highlighted.paste(red_layer, (0, 0), mask)
+
+            header_h = 42
+            gap = 16
+            result = Image.new("RGB", (width * 3 + gap * 4, height + header_h + gap * 2), (238, 241, 245))
+            draw = ImageDraw.Draw(result)
+            panels = [
+                (ia, "PDF A"),
+                (ib, "PDF B"),
+                (highlighted, "Различия (красным)"),
+            ]
+            for panel_index, (image, label) in enumerate(panels):
+                x = gap + panel_index * (width + gap)
+                draw.text((x, 12), label, fill=(25, 35, 50))
+                result.paste(image, (x, header_h))
+            target = outdir / f"diff_page_{i + 1:04d}.png"
+            result.save(target, format="PNG", optimize=True)
+            if target.stat().st_size == 0:
+                raise RuntimeError(f"Не удалось сформировать изображение сравнения страницы {i + 1}")
+            outputs.append(target)
+
+    return outputs
 
 def extract_images(source: str | Path, output_dir: str | Path) -> list[Path]:
     src, outdir = Path(source), Path(output_dir)
