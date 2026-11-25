@@ -13,7 +13,7 @@ from pathlib import Path
 from urllib.request import Request, urlopen
 
 REPOSITORY = "s0kkia/PDFTools"
-PACKAGE_NAME = "PDFTools_2.0_Windows_x64.zip"
+PACKAGE_NAME = "PDFTools_2.0.2_Windows_x64.zip"
 CHECKSUM_NAME = "SHA256SUMS.txt"
 USER_AGENT = "PDFTools-Updater"
 
