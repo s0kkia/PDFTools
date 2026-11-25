@@ -56,7 +56,7 @@ def _write_update_log(message: str) -> None:
     root = _updates_root()
     root.mkdir(parents=True, exist_ok=True)
     with (root / "update.log").open("a", encoding="utf-8") as stream:
-        stream.write(f"{datetime.now().isoformat(timespec='seconds')} {message}\\n")
+        stream.write(f"{datetime.now().isoformat(timespec='seconds')} {message}\n")
 
 
 def _download(url: str, destination: Path, progress=None, timeout: int = 60) -> Path:
