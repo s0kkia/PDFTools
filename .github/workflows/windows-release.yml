@@ -27,7 +27,7 @@ jobs:
       - name: Run tests
         run: python -m pytest -q
       - name: Build application folder (PyInstaller onedir)
-        run: pyinstaller --noconfirm --clean --windowed --onedir --name PDFTools main.py
+        run: pyinstaller --noconfirm --clean --windowed --onedir --icon=PDFTools.ico --name PDFTools main.py
       - name: Package portable folder
         shell: pwsh
         run: |
