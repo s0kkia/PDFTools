@@ -1132,84 +1132,26 @@ class MainWindow(QMainWindow):
 
 
 class StartupSplash(QWidget):
-    """Компактная стартовая заставка PDFTools с ненавязчивой шуткой."""
-
-    MESSAGES = [
-        "Ну потерпи ещё чуточку, PDF сам себя не откроет!",
-        "Собираем пиксели в кучку…",
-        "Загружаем тяжёлую артиллерию для PDF…",
-        "Проверяем, не убежали ли ваши документы…",
-        "Почти готово. Не переключайтесь, мы стараемся!",
-        "PDFTools просыпается. Кофе ему не предлагать!",
-    ]
+    """Заставка PDFTools: отображается до полной инициализации главного окна."""
 
     def __init__(self):
         super().__init__(None, Qt.SplashScreen | Qt.FramelessWindowHint | Qt.WindowStaysOnTopHint)
-        self.setFixedSize(540, 310)
+        pixmap = QPixmap(resource_path("splash.png"))
+        if pixmap.isNull():
+            raise FileNotFoundError("Не найден файл заставки splash.png")
+        self.setFixedSize(pixmap.size())
         self.setWindowTitle("PDFTools")
-        self.setStyleSheet("""
-            QWidget#SplashRoot { background:#171d29; color:#edf2fa; }
-            QLabel#Brand { color:#f4f7fc; font-size:25pt; font-weight:700; }
-            QLabel#Version { color:#8fa2bd; font-size:10pt; }
-            QLabel#Message { color:#dce7f7; font-size:11pt; }
-            QLabel#Footer { color:#8291a7; font-size:9pt; }
-            QProgressBar { background:#293448; border:0; border-radius:4px; height:8px; }
-            QProgressBar::chunk { background:#4a8cff; border-radius:4px; }
-        """)
-        root = QVBoxLayout(self)
-        root.setContentsMargins(34, 28, 34, 24)
-        root.setSpacing(12)
-
-        brand_row = QHBoxLayout()
-        logo = QLabel()
-        icon = QIcon(resource_path("PDFTools.ico"))
-        if not icon.isNull():
-            logo.setPixmap(icon.pixmap(QSize(58, 58)))
-        else:
-            logo.setText("PDF")
-            logo.setStyleSheet("font-size:20pt;font-weight:700;color:#69a0ff;")
-        brand_row.addWidget(logo)
-        brand_text = QVBoxLayout()
-        title = QLabel("PDFTools")
-        title.setObjectName("Brand")
-        version = QLabel(f"Версия {__version__}")
-        version.setObjectName("Version")
-        brand_text.addWidget(title)
-        brand_text.addWidget(version)
-        brand_row.addLayout(brand_text)
-        brand_row.addStretch()
-        root.addLayout(brand_row)
-
-        separator = QFrame()
-        separator.setFrameShape(QFrame.HLine)
-        separator.setStyleSheet("color:#344157;")
-        root.addWidget(separator)
-
-        headline = QLabel("Подготавливаем рабочее пространство")
-        headline.setStyleSheet("font-size:14pt;font-weight:600;color:#ffffff;")
-        root.addWidget(headline)
-
-        message = QLabel(__import__("random").choice(self.MESSAGES))
-        message.setObjectName("Message")
-        message.setWordWrap(True)
-        root.addWidget(message)
-
-        root.addStretch()
-        self.progress = QProgressBar()
-        self.progress.setRange(0, 0)
-        self.progress.setTextVisible(False)
-        root.addWidget(self.progress)
-
-        footer = QLabel("PDF сам себя не обработает. Но мы уже почти начали.")
-        footer.setObjectName("Footer")
-        root.addWidget(footer)
-
-        self.setObjectName("SplashRoot")
-        self.adjustSize()
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(0, 0, 0, 0)
+        image = QLabel()
+        image.setPixmap(pixmap)
+        image.setFixedSize(pixmap.size())
+        layout.addWidget(image)
         screen = QApplication.primaryScreen()
         if screen:
             area = screen.availableGeometry()
             self.move(area.center() - self.rect().center())
+
 
 
 def main():
@@ -1223,5 +1165,6 @@ def main():
 
     window=MainWindow()
     window.show()
+    app.processEvents()
     splash.close()
     sys.exit(app.exec())
