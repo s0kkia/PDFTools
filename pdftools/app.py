@@ -14,9 +14,8 @@ from PySide6.QtWidgets import (
 )
 from pdftools import __version__
 from pdftools.core.repair import repair_file
-from pdftools.core.operations import (merge_pdfs, split_pdf, compress_pdf, set_metadata,
+from pdftools.core.operations import (merge_pdfs, split_pdf, set_metadata,
     add_image_stamp, add_text_watermark, compare_pdfs, extract_images, extract_tables)
-from pdftools.core.ocr import ocr_to_searchable_pdf
 from pdftools.core.history import HistoryStore
 from pdftools.services import updater
 from pdftools.services.data_paths import data_dir
@@ -528,8 +527,6 @@ class MainWindow(QMainWindow):
             ("Обработка PDF", self._batch_page),
             ("Штамп", self._stamp_page),
             ("Сравнение PDF", self._compare_page),
-            ("OCR", self._ocr_page),
-            ("Сжатие", self._compress_page),
             ("История", self._history_page),
         ]
         for name, factory in nav:
@@ -619,8 +616,6 @@ class MainWindow(QMainWindow):
             self.watermark_src.setText(str(self.selected_pdf))
         if hasattr(self, "compare_a"):
             self.compare_a.setText(str(self.selected_pdf))
-        if hasattr(self, "ocr_src"):
-            self.ocr_src.setText(str(self.selected_pdf))
         if hasattr(self, "comp_src"):
             self.comp_src.setText(str(self.selected_pdf))
         if hasattr(self, "meta_src"):
@@ -837,19 +832,6 @@ class MainWindow(QMainWindow):
             r=QHBoxLayout(); r.addWidget(QLabel(label)); r.addWidget(w); b=QPushButton("Обзор"); b.clicked.connect(lambda _,x=w:self.pick_file(x,"PDF (*.pdf)")); r.addWidget(b); l.addLayout(r)
         b=QPushButton("Сравнить страницы"); b.clicked.connect(self.run_compare); l.addWidget(b); l.addStretch(); return p
 
-    def _ocr_page(self):
-        p=QWidget(); l=QVBoxLayout(p)
-        self.ocr_src=QLineEdit(); r=QHBoxLayout(); r.addWidget(self.ocr_src); b=QPushButton("Выбрать PDF"); b.clicked.connect(lambda:self.pick_file(self.ocr_src,"PDF (*.pdf)")); r.addWidget(b); l.addLayout(r)
-        self.ocr_lang=QComboBox(); self.ocr_lang.addItems(["rus+eng","rus","eng"])
-        l.addWidget(QLabel("Языки OCR (необходим Tesseract OCR):")); l.addWidget(self.ocr_lang)
-        run=QPushButton("Создать PDF с распознанным текстом"); run.clicked.connect(self.run_ocr); l.addWidget(run); l.addStretch(); return p
-
-    def _compress_page(self):
-        p=QWidget(); l=QVBoxLayout(p)
-        self.comp_src=QLineEdit(); r=QHBoxLayout(); r.addWidget(self.comp_src); b=QPushButton("Выбрать PDF"); b.clicked.connect(lambda:self.pick_file(self.comp_src,"PDF (*.pdf)")); r.addWidget(b); l.addLayout(r)
-        self.comp_level=QComboBox(); self.comp_level.addItems(["light","balanced","strong"]); l.addWidget(self.comp_level)
-        run=QPushButton("Сжать PDF"); run.clicked.connect(self.compress_dialog); l.addWidget(run); l.addStretch(); return p
-
     def _metadata_page(self):
         p=QWidget(); l=QFormLayout()
         self.meta_src=QLineEdit(); self.meta_title=QLineEdit(); self.meta_author=QLineEdit(); self.meta_subject=QLineEdit(); self.meta_keywords=QLineEdit()
@@ -880,7 +862,7 @@ class MainWindow(QMainWindow):
             if str(self.selected_pdf) not in existing:
                 self.add_pdfs_to_workspace([str(self.selected_pdf)])
         if self.selected_pdf and self.selected_pdf.exists():
-            for attr in ("stamp_src", "watermark_src", "compare_a", "ocr_src", "comp_src", "meta_src", "extract_src"):
+            for attr in ("stamp_src", "watermark_src", "compare_a", "meta_src", "extract_src"):
                 widget = getattr(self, attr, None)
                 if widget is not None and (attr != "compare_a" or not widget.text()):
                     widget.setText(str(self.selected_pdf))
@@ -965,16 +947,6 @@ class MainWindow(QMainWindow):
             try: result=split_pdf(src,out); self.history.add("Разделение",src,out,details=f"{len(result)} страниц"); self.write_log(f"Создано файлов: {len(result)}")
             except Exception as e: QMessageBox.critical(self,"Ошибка",str(e))
 
-    def compress_dialog(self):
-        src=self.comp_src.text().strip() if hasattr(self,"comp_src") else ""
-        if not src:
-            src,_=QFileDialog.getOpenFileName(self,"Выбрать PDF","","PDF (*.pdf)")
-        if not src:return
-        out,_=QFileDialog.getSaveFileName(self,"Сохранить сжатый PDF","","PDF (*.pdf)")
-        if out:
-            try: compress_pdf(src,out,self.comp_level.currentText() if hasattr(self,"comp_level") else "balanced"); self.history.add("Сжатие",src,out); self.write_log(f"Сжатие завершено: {out}")
-            except Exception as e: QMessageBox.critical(self,"Ошибка",str(e))
-
     def run_stamp(self):
         try:
             src=Path(self.stamp_src.text())
@@ -1033,14 +1005,6 @@ class MainWindow(QMainWindow):
             self.history.add("Сравнение",self.compare_a.text(),out,details=f"{len(results)} страниц")
             QMessageBox.information(self,"Сравнение",f"Создано изображений различий: {len(results)}")
         except Exception as e: QMessageBox.critical(self,"Ошибка сравнения",str(e))
-
-    def run_ocr(self):
-        try:
-            src=self.ocr_src.text(); out,_=QFileDialog.getSaveFileName(self,"Сохранить OCR PDF","","PDF (*.pdf)")
-            if not out:return
-            ocr_to_searchable_pdf(src,out,self.ocr_lang.currentText())
-            self.history.add("OCR",src,out); self.write_log(f"OCR завершён: {out}")
-        except Exception as e: QMessageBox.critical(self,"Ошибка OCR",str(e))
 
     def run_metadata(self):
         try:
