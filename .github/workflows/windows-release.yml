@@ -1,6 +1,9 @@
 name: Build Windows release
 
 on:
+  pull_request:
+    branches:
+      - main
   push:
     tags:
       - "v*"
@@ -57,7 +60,7 @@ jobs:
       - name: Upload build artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: PDFTools-${{ inputs.release_tag || github.ref_name }}-Windows-x64
+          name: PDFTools-Windows-x64
           path: |
             dist/PDFTools/
             PDFTools_2.0_Windows_x64.zip

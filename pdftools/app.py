@@ -65,10 +65,10 @@ class UpdateDownloadJob(QThread):
 
 
 class UpdateDialog(QDialog):
-    def __init__(self, parent=None, automatic=False):
+    def __init__(self, parent=None, automatic=False, release=None):
         super().__init__(parent)
         self.automatic = automatic
-        self.setWindowTitle("Обновление PDFTools")
+        self.setWindowTitle("УПС! ОБНОВА" if automatic else "Обновление PDFTools")
         self.setMinimumWidth(480)
         layout = QVBoxLayout(self)
         self.status = QLabel("Проверка доступной версии…")
@@ -90,9 +90,12 @@ class UpdateDialog(QDialog):
             self.close_btn.hide()
         self.release = None
         self.download_job = None
-        self.worker = Job(updater.latest_release)
-        self.worker.finished_one.connect(self.on_release)
-        self.worker.start()
+        if release is not None:
+            self.on_release(release)
+        else:
+            self.worker = Job(updater.latest_release)
+            self.worker.finished_one.connect(self.on_release)
+            self.worker.start()
 
     def on_release(self, result):
         if isinstance(result, Exception):
@@ -112,7 +115,7 @@ class UpdateDialog(QDialog):
         if updater.PACKAGE_NAME not in assets or updater.CHECKSUM_NAME not in assets:
             self.detail.setText("Релиз найден, но в нём отсутствует архив программы или файл контрольной суммы.")
             return
-        self.detail.setText("УПС! ОБНОВА. Нажмите ОК — загрузка и установка начнутся автоматически. Настройки, история и библиотека штампов сохраняются.")
+        self.detail.setText("Доступна новая версия PDFTools. Нажмите ОК — загрузка, проверка и установка пройдут автоматически. Настройки, история и библиотека штампов сохраняются.")
         self.action_btn.setEnabled(True)
 
     def download_update(self):
@@ -141,6 +144,7 @@ class UpdateDialog(QDialog):
             self.status.setText("Не удалось загрузить обновление")
             self.detail.setText(str(result))
             self.action_btn.setEnabled(True)
+            self.close_btn.show()
             self.close_btn.setEnabled(True)
             return
         self.progress.setValue(100)
@@ -163,6 +167,7 @@ class UpdateDialog(QDialog):
             self.detail.setText(f"Программа закроется. Журнал установки: {log_path}")
         except Exception as exc:
             QMessageBox.critical(self, "Ошибка обновления", str(exc))
+            self.close_btn.show()
             self.close_btn.setEnabled(True)
             return
         self.accept()
@@ -1131,101 +1136,23 @@ class MainWindow(QMainWindow):
             for col,value in enumerate(record):
                 self.history_table.setItem(row,col,QTableWidgetItem(str(value or "")))
 
+    def check_auto_updates(self):
+        if not updater.auto_check_due():
+            return
+        self._auto_update_worker = Job(updater.latest_release)
+        self._auto_update_worker.finished_one.connect(self.on_auto_update_probe)
+        self._auto_update_worker.start()
+
+    def on_auto_update_probe(self, result):
+        if isinstance(result, Exception):
+            return
+        updater.mark_auto_check()
+        latest = result.get("tag_name", "").lstrip("v")
+        if updater.is_newer(latest, __version__):
+            dialog = UpdateDialog(self, automatic=True, release=result)
+            dialog.exec()
+
     def check_updates(self):
         dialog=UpdateDialog(self); dialog.exec()
 
 
-
-class StartupSplash(QWidget):
-    """Заставка PDFTools с анимированным индикатором и меняющимися фразами."""
-
-    MESSAGES = [
-        "Ну потерпи ещё чуточку...",
-        "Загружаем тяжёлую артиллерию для PDF…",
-        "Проверяем, не убежали ли ваши документы…",
-        "Собираем пиксели в кучку…",
-        "Почти готово. Не переключайтесь!",
-        "PDFTools просыпается. Кофе ему не предлагать!",
-        "Ещё немного — и можно работать!",
-        "Раскладываем ваши PDF по полочкам…",
-        "Упс долго гружусь.... Солтех занялся исправлением... ожидайтеееееее",
-    ]
-
-    def __init__(self):
-        super().__init__(None, Qt.SplashScreen | Qt.FramelessWindowHint | Qt.WindowStaysOnTopHint)
-        self.pixmap = QPixmap(resource_path("splash.png"))
-        if self.pixmap.isNull():
-            raise FileNotFoundError("Не удалось загрузить встроенное изображение заставки splash.png")
-        self.setFixedSize(self.pixmap.size())
-        self.setWindowTitle("PDFTools")
-        self._message = random.choice(self.MESSAGES)
-        self._bar_x = 0
-        self._bar_direction = 1
-
-        self.animation_timer = QTimer(self)
-        self.animation_timer.timeout.connect(self._advance_animation)
-        self.animation_timer.start(25)
-
-        self.message_timer = QTimer(self)
-        self.message_timer.timeout.connect(self._change_message)
-        self.message_timer.start(2800)
-
-        screen = QApplication.primaryScreen()
-        if screen:
-            area = screen.availableGeometry()
-            self.move(area.center() - self.rect().center())
-
-    def _advance_animation(self):
-        segment_width = 250
-        limit = max(0, self.width() - 94 - segment_width)
-        self._bar_x += 12 * self._bar_direction
-        if self._bar_x >= limit:
-            self._bar_x = limit
-            self._bar_direction = -1
-        elif self._bar_x <= 0:
-            self._bar_x = 0
-            self._bar_direction = 1
-        self.update()
-
-    def _change_message(self):
-        choices = [message for message in self.MESSAGES if message != self._message]
-        self._message = random.choice(choices)
-        self.update()
-
-    def paintEvent(self, event):
-        painter = QPainter(self)
-        painter.setRenderHint(QPainter.Antialiasing, True)
-        painter.drawPixmap(0, 0, self.pixmap)
-
-        # Перерисовываем только заголовок, сохраняя исходный дизайн заставки.
-        painter.fillRect(44, 88, self.width() - 88, 31, QColor("#17222e"))
-        font = QFont("Arial", 17)
-        font.setBold(True)
-        painter.setFont(font)
-        painter.setPen(QColor("#f4f6f8"))
-        painter.drawText(46, 111, self._message)
-
-        # Движущийся сегмент на исходной дорожке индикатора.
-        track_x, track_y, track_width, track_height = 47, 165, self.width() - 94, 8
-        painter.setPen(Qt.NoPen)
-        painter.setBrush(QColor("#3c4b59"))
-        painter.drawRoundedRect(track_x, track_y, track_width, track_height, 4, 4)
-        painter.setBrush(QColor("#45b9a8"))
-        painter.drawRoundedRect(track_x + self._bar_x, track_y, 250, track_height, 4, 4)
-        painter.end()
-
-
-def main():
-    app=QApplication(sys.argv)
-    app.setStyle("Fusion")
-    app.setStyleSheet(DARK_QSS)
-
-    splash = StartupSplash()
-    splash.show()
-    app.processEvents()
-
-    window = MainWindow()
-    window.show()
-    app.processEvents()
-    splash.close()
-    sys.exit(app.exec())
