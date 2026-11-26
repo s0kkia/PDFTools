@@ -6,9 +6,9 @@ import os
 import re
 import shutil
 import subprocess
-import sys
 import tempfile
 import zipfile
+from datetime import datetime, timedelta
 from pathlib import Path
 from urllib.request import Request, urlopen
 
@@ -38,12 +38,53 @@ def is_newer(latest: str, current: str) -> bool:
     return a + (0,) * (size - len(a)) > b + (0,) * (size - len(b))
 
 
+def auto_check_due(last_checked: str | None = None, now: datetime | None = None, interval_days: int = 14) -> bool:
+    """Return True when the automatic release check is due."""
+    if last_checked is None:
+        marker = _updates_root() / "last_auto_check.txt"
+        try:
+            last_checked = marker.read_text(encoding="utf-8").strip() or None
+        except OSError:
+            last_checked = None
+    if not last_checked:
+        return True
+    try:
+        previous = datetime.fromisoformat(last_checked)
+    except (TypeError, ValueError):
+        return True
+    current = now or datetime.now(previous.tzinfo)
+    if previous.tzinfo is None and current.tzinfo is not None:
+        current = current.replace(tzinfo=None)
+    elif previous.tzinfo is not None and current.tzinfo is None:
+        current = current.replace(tzinfo=previous.tzinfo)
+    return current - previous >= timedelta(days=interval_days)
+
+
+def mark_auto_check(now: datetime | None = None) -> None:
+    marker = _updates_root() / "last_auto_check.txt"
+    marker.parent.mkdir(parents=True, exist_ok=True)
+    marker.write_text((now or datetime.now()).isoformat(timespec="seconds"), encoding="utf-8")
+
+
 def sha256(path: Path) -> str:
     digest = hashlib.sha256()
     with path.open("rb") as stream:
         for chunk in iter(lambda: stream.read(1024 * 1024), b""):
             digest.update(chunk)
     return digest.hexdigest()
+
+
+def _updates_root() -> Path:
+    base = Path(os.environ.get("LOCALAPPDATA", Path.home() / "AppData" / "Local"))
+    return base / "PDFTools" / "Updates"
+
+
+def _write_update_log(message: str) -> None:
+    """Write diagnostics outside the temporary download folder."""
+    root = _updates_root()
+    root.mkdir(parents=True, exist_ok=True)
+    with (root / "update.log").open("a", encoding="utf-8") as stream:
+        stream.write(f"{datetime.now().isoformat(timespec='seconds')} {message}\n")
 
 
 def _download(url: str, destination: Path, progress=None, timeout: int = 60) -> Path:
@@ -72,11 +113,19 @@ def download_and_verify(release: dict, progress=None) -> Path:
     if os.name != "nt":
         raise RuntimeError("Установка обновлений поддерживается только в Windows.")
 
-    work = Path(tempfile.mkdtemp(prefix="PDFTools-update-"))
+    version = release.get("tag_name", "unknown").lstrip("v")
+    stamp = datetime.now().strftime("%Y%m%d-%H%M%S")
+    work = _updates_root() / f"{version}-{stamp}"
+    work.mkdir(parents=True, exist_ok=False)
+    _write_update_log(f"Начата загрузка обновления {release.get('tag_name', version)}; рабочая папка: {work}")
     archive = work / PACKAGE_NAME
     checksum_file = work / CHECKSUM_NAME
-    _download(package.get("browser_download_url") or package["url"], archive, progress)
-    _download(checksum_asset.get("browser_download_url") or checksum_asset["url"], checksum_file)
+    try:
+        _download(package.get("browser_download_url") or package["url"], archive, progress)
+        _download(checksum_asset.get("browser_download_url") or checksum_asset["url"], checksum_file)
+    except Exception as exc:
+        _write_update_log(f"ОШИБКА загрузки: {exc}; файлы оставлены: {work}")
+        raise
 
     expected = None
     for line in checksum_file.read_text(encoding="utf-8-sig").splitlines():
@@ -85,8 +134,9 @@ def download_and_verify(release: dict, progress=None) -> Path:
             expected = parts[0].lower()
             break
     if not expected or sha256(archive) != expected:
-        shutil.rmtree(work, ignore_errors=True)
-        raise RuntimeError("Контрольная сумма ZIP не совпадает. Установка отменена.")
+        _write_update_log(f"ОШИБКА SHA256; файлы оставлены: {work}")
+        raise RuntimeError(f"Контрольная сумма ZIP не совпадает. Файлы оставлены для диагностики: {work}")
+    _write_update_log(f"Загрузка {version} завершена; SHA256 проверена; архив: {archive}")
 
     extracted = work / "extracted"
     extracted.mkdir()
@@ -99,69 +149,176 @@ def download_and_verify(release: dict, progress=None) -> Path:
         zipped.extractall(extracted)
 
     app_folder = extracted / "PDFTools"
-    executable = app_folder / "PDFTools.exe"
-    if not executable.is_file():
-        raise RuntimeError("В архиве не найдена PDFTools/PDFTools.exe.")
+    if not (app_folder / "PDFTools.exe").is_file():
+        _write_update_log(f"ОШИБКА: в архиве отсутствует PDFTools.exe; архив: {archive}")
+        raise RuntimeError(f"В архиве не найдена PDFTools/PDFTools.exe. Архив сохранён: {archive}")
+    _write_update_log(f"Архив распакован; подготовлено к установке: {app_folder}")
     return work
 
 
-def launch_update(work: Path, install_dir: Path, process_id: int) -> None:
+def cleanup_download(work: Path) -> None:
+    """Remove a downloaded/staged update when the user cancels installation."""
+    work = work.resolve()
+    root = _updates_root().resolve()
+    if work.parent == root and work.name not in {"PreviousVersion", "PreviousVersion.new"}:
+        shutil.rmtree(work, ignore_errors=True)
+
+
+def launch_update(work: Path, install_dir: Path, process_id: int) -> Path:
+    """Install a verified update, retaining exactly one previous application version."""
     if os.name != "nt":
         raise RuntimeError("Автоматическая установка доступна только в Windows.")
+
+    work = work.resolve()
+    updates_root = _updates_root().resolve()
     install_dir = install_dir.resolve()
     staged = (work / "extracted" / "PDFTools").resolve()
-    executable = install_dir / "PDFTools.exe"
-    if not executable.is_file() or not staged.joinpath("PDFTools.exe").is_file():
+    if work.parent != updates_root:
+        raise RuntimeError("Папка обновления находится вне разрешённого каталога.")
+    if not (install_dir / "PDFTools.exe").is_file() or not (staged / "PDFTools.exe").is_file():
+        _write_update_log(f"ОШИБКА: не найдена текущая или новая PDFTools.exe; install={install_dir}; staged={staged}")
         raise RuntimeError("Не найдена текущая или новая версия PDFTools.exe.")
+    _write_update_log(f"Запрошена установка; PID={process_id}; каталог программы: {install_dir}")
 
-    # Run the updater outside the application folder so it survives replacement.
+    updates_root.mkdir(parents=True, exist_ok=True)
+    log = updates_root / "update.log"
     script = work / "install_update.ps1"
-    backup = install_dir.with_name(install_dir.name + ".backup")
-    log = work / "update.log"
+    previous = updates_root / "PreviousVersion"
+    old_install = install_dir.with_name(install_dir.name + ".update-previous")
+    new_install = install_dir.with_name(install_dir.name + ".update-new")
+
     ps = r"""
 $ErrorActionPreference = 'Stop'
 $pidToWait = __PID__
 $install = '__INSTALL__'
 $staged = '__STAGED__'
-$backup = '__BACKUP__'
-$exe = Join-Path $install 'PDFTools.exe'
+$updatesRoot = '__UPDATES_ROOT__'
+$previous = Join-Path $updatesRoot 'PreviousVersion'
+$oldInstall = '__OLD_INSTALL__'
+$newInstall = '__NEW_INSTALL__'
+$work = '__WORK__'
 $log = '__LOG__'
-Start-Sleep -Seconds 2
-try {
-    Wait-Process -Id $pidToWait -ErrorAction SilentlyContinue
-    if (Test-Path $backup) { Remove-Item -LiteralPath $backup -Recurse -Force }
-    Move-Item -LiteralPath $install -Destination $backup
-    try {
-        Move-Item -LiteralPath $staged -Destination $install
-        if (!(Test-Path (Join-Path $install 'PDFTools.exe'))) { throw 'New executable missing after copy' }
-        Start-Process -FilePath (Join-Path $install 'PDFTools.exe')
-        Start-Sleep -Seconds 8
-        if (!(Get-Process -Name 'PDFTools' -ErrorAction SilentlyContinue)) {
-            throw 'Updated PDFTools process did not remain running; rolling back'
+
+function Write-Log($message) {
+    $line = "$(Get-Date -Format o) $message"
+    # Logging must never interrupt installation if another process briefly holds the log.
+    for ($attempt = 0; $attempt -lt 8; $attempt++) {
+        try {
+            Add-Content -LiteralPath $log -Value $line -Encoding UTF8 -ErrorAction Stop
+            return
         }
-        Remove-Item -LiteralPath $backup -Recurse -Force
-    } catch {
-        if (Test-Path $install) { Remove-Item -LiteralPath $install -Recurse -Force }
-        if (Test-Path $backup) { Move-Item -LiteralPath $backup -Destination $install }
-        Start-Process -FilePath (Join-Path $install 'PDFTools.exe')
-        throw
+        catch {
+            Start-Sleep -Milliseconds 250
+        }
     }
-} catch {
-    $_ | Out-File -FilePath $log -Append -Encoding utf8
 }
-""".replace("__PID__", str(int(process_id)))
+function Remove-Safe($path) {
+    if (Test-Path -LiteralPath $path) {
+        Remove-Item -LiteralPath $path -Recurse -Force
+    }
+}
+
+$oldMoved = $false
+$newStarted = $false
+try {
+    Write-Log "------------------------------------------------------------"
+    Write-Log "Update started. Waiting for PDFTools PID $pidToWait."
+    while (Get-Process -Id $pidToWait -ErrorAction SilentlyContinue) {
+        Start-Sleep -Seconds 1
+    }
+    Write-Log "Application closed. Preparing new version."
+
+    Remove-Safe $newInstall
+    Remove-Safe $oldInstall
+    New-Item -ItemType Directory -Path $newInstall -Force | Out-Null
+    Copy-Item -Path (Join-Path $staged '*') -Destination $newInstall -Recurse -Force
+    if (!(Test-Path -LiteralPath (Join-Path $newInstall 'PDFTools.exe'))) {
+        throw "Staged executable missing."
+    }
+    Write-Log "New version staged."
+
+    Move-Item -LiteralPath $install -Destination $oldInstall
+    $oldMoved = $true
+    Write-Log "Current version moved temporarily: $oldInstall"
+
+    Move-Item -LiteralPath $newInstall -Destination $install
+    Write-Log "New version installed."
+
+    $newProcess = Start-Process -FilePath (Join-Path $install 'PDFTools.exe') -WorkingDirectory $install -PassThru
+    Start-Sleep -Seconds 15
+    $newProcess.Refresh()
+    if ($newProcess.HasExited) {
+        throw "New PDFTools process exited during startup (code $($newProcess.ExitCode))."
+    }
+    $newStarted = $true
+    Write-Log "New version started successfully (PID $($newProcess.Id))."
+
+    # Replace the previous backup only after the new version is confirmed running.
+    Remove-Safe $previous
+    Move-Item -LiteralPath $oldInstall -Destination $previous
+    $oldMoved = $false
+    Write-Log "Previous version saved at $previous. Older backup discarded."
+
+    # Cleanup is best-effort and must never close a successfully started application.
+    Set-Location $env:TEMP
+    try {
+        Remove-Safe $work
+        Get-ChildItem -LiteralPath $updatesRoot -Force |
+            Where-Object { $_.Name -notin @('PreviousVersion', 'update.log') } |
+            ForEach-Object {
+                try { Remove-Item -LiteralPath $_.FullName -Recurse -Force -ErrorAction Stop }
+                catch { Write-Log "WARNING: temporary folder retained for later cleanup: $($_.FullName); $_" }
+            }
+        Write-Log "Update completed. Temporary cleanup finished."
+    }
+    catch {
+        Write-Log "WARNING: update installed and running, but temporary cleanup was deferred: $_"
+    }
+}
+catch {
+    Write-Log "UPDATE ERROR: $_"
+    try {
+        if ($newStarted) {
+            Get-Process -Name 'PDFTools' -ErrorAction SilentlyContinue |
+                Stop-Process -Force -ErrorAction SilentlyContinue
+            Start-Sleep -Seconds 2
+        }
+        if ($oldMoved -and (Test-Path -LiteralPath $oldInstall)) {
+            Remove-Safe $install
+            Move-Item -LiteralPath $oldInstall -Destination $install
+            Write-Log "Previous running version restored."
+            Start-Process -FilePath (Join-Path $install 'PDFTools.exe') -WorkingDirectory $install
+            Write-Log "Previous version restarted."
+        }
+        Remove-Safe $newInstall
+        # Keep the downloaded archive and installer script after failure for diagnostics.
+        Set-Location $env:TEMP
+    }
+    catch {
+        Write-Log "ROLLBACK ERROR: $_"
+    }
+}
+"""
     replacements = {
+        "__PID__": str(int(process_id)),
         "__INSTALL__": str(install_dir),
         "__STAGED__": str(staged),
-        "__BACKUP__": str(backup),
+        "__UPDATES_ROOT__": str(updates_root),
+        "__OLD_INSTALL__": str(old_install),
+        "__NEW_INSTALL__": str(new_install),
+        "__WORK__": str(work),
         "__LOG__": str(log),
     }
     for key, value in replacements.items():
         ps = ps.replace(key, value.replace("'", "''"))
     script.write_text(ps, encoding="utf-8")
-    encoded = __import__("base64").b64encode(ps.encode("utf-16le")).decode("ascii")
+    import base64
+    encoded = base64.b64encode(ps.encode("utf-16le")).decode("ascii")
+    _write_update_log(f"Запускается установщик PowerShell; скрипт: {script}; журнал: {log}")
     subprocess.Popen(
         ["powershell.exe", "-NoProfile", "-ExecutionPolicy", "Bypass", "-EncodedCommand", encoded],
+        cwd=str(work),
         creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
         close_fds=True,
     )
+    return log
