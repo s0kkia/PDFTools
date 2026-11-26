@@ -117,14 +117,16 @@ def _download(url: str, destination: Path, progress=None, timeout: int = 60) -> 
 
 
 def download_and_verify(release: dict, progress=None) -> Path:
+    # Reject unsupported platforms before inspecting release assets; this also
+    # keeps the platform guard deterministic and independently testable.
+    if not _is_windows():
+        raise RuntimeError("Установка обновлений поддерживается только в Windows.")
+
     assets = {asset.get("name"): asset for asset in release.get("assets", [])}
     package = assets.get(PACKAGE_NAME)
     checksum_asset = assets.get(CHECKSUM_NAME)
     if not package or not checksum_asset:
         raise RuntimeError("В релизе отсутствует ZIP программы или SHA256SUMS.txt.")
-    if not _is_windows():
-        raise RuntimeError("Установка обновлений поддерживается только в Windows.")
-
     version = release.get("tag_name", "unknown").lstrip("v")
     stamp = datetime.now().strftime("%Y%m%d-%H%M%S")
     work = _updates_root() / f"{version}-{stamp}"
