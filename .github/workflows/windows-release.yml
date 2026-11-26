@@ -1,6 +1,9 @@
 name: Build Windows release
 
 on:
+  pull_request:
+    branches:
+      - main
   push:
     tags:
       - "v*"
