@@ -53,6 +53,29 @@ def set_metadata(source: str | Path, output: str | Path, metadata: dict[str, str
     return dst
 
 
+def insert_image_at_visual_rect(page, image: str | Path, visual_rect: fitz.Rect,
+                                  overlay: bool = True) -> int:
+    """Insert an image at coordinates measured on the page as displayed to the user.
+
+    PyMuPDF's insertion API uses the unrotated page coordinate system, while
+    page.rect / rendered page coordinates include /Rotate. Transform the
+    visual rectangle back to PDF coordinates and counter-rotate the image so
+    it remains upright in the viewer/printed output.
+    """
+    rotation = int(page.rotation) % 360
+    if rotation not in (0, 90, 180, 270):
+        raise ValueError(f"Неподдерживаемый поворот страницы PDF: {rotation}°")
+    target_rect = fitz.Rect(visual_rect)
+    if rotation:
+        target_rect = target_rect * page.derotation_matrix
+    return page.insert_image(
+        target_rect,
+        filename=str(image),
+        rotate=rotation,
+        overlay=overlay,
+    )
+
+
 def add_image_stamp(source: str | Path, image: str | Path, output: str | Path,
                     page_number: int, x: float, y: float, width: float) -> Path:
     """x/y/width are PDF points; x/y define top-left origin on the selected page."""
