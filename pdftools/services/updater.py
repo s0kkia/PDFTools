@@ -66,8 +66,13 @@ def auto_check_due(last_checked: str | None = None, now: datetime | None = None,
 
 def mark_auto_check(now: datetime | None = None) -> None:
     marker = _updates_root() / "last_auto_check.txt"
-    marker.parent.mkdir(parents=True, exist_ok=True)
-    marker.write_text((now or datetime.now()).isoformat(timespec="seconds"), encoding="utf-8")
+    try:
+        marker.parent.mkdir(parents=True, exist_ok=True)
+        temporary = marker.with_suffix(".tmp")
+        temporary.write_text((now or datetime.now()).isoformat(timespec="seconds"), encoding="utf-8")
+        temporary.replace(marker)
+    except OSError as exc:
+        _write_update_log(f"WARNING: не удалось сохранить время проверки обновления: {exc}")
 
 
 def sha256(path: Path) -> str:
@@ -84,11 +89,14 @@ def _updates_root() -> Path:
 
 
 def _write_update_log(message: str) -> None:
-    """Write diagnostics outside the temporary download folder."""
-    root = _updates_root()
-    root.mkdir(parents=True, exist_ok=True)
-    with (root / "update.log").open("a", encoding="utf-8") as stream:
-        stream.write(f"{datetime.now().isoformat(timespec='seconds')} {message}\n")
+    """Write diagnostics without allowing log failures to interrupt updates."""
+    try:
+        root = _updates_root()
+        root.mkdir(parents=True, exist_ok=True)
+        with (root / "update.log").open("a", encoding="utf-8") as stream:
+            stream.write(f"{datetime.now().isoformat(timespec='seconds')} {message}\\n")
+    except OSError:
+        pass
 
 
 def _download(url: str, destination: Path, progress=None, timeout: int = 60) -> Path:
