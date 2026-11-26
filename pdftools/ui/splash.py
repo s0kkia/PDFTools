@@ -2,14 +2,14 @@ from __future__ import annotations
 
 import random
 from PySide6.QtCore import Qt, QTimer
-from PySide6.QtGui import QPainter, QColor, QFont, QLinearGradient
+from PySide6.QtGui import QPainter, QColor, QFont
 from PySide6.QtWidgets import QApplication, QWidget
 
 from pdftools import __version__
 
 
 class StartupSplash(QWidget):
-    """Самодостаточная заставка PDFTools: фон рисуется кодом, фразы меняются автоматически."""
+    """Лёгкая заставка PDFTools без Tcl/Tk и внешних изображений."""
 
     MESSAGES = [
         "Ну потерпи ещё чуточку…",
@@ -28,7 +28,7 @@ class StartupSplash(QWidget):
 
     def __init__(self):
         super().__init__(None, Qt.SplashScreen | Qt.FramelessWindowHint | Qt.WindowStaysOnTopHint)
-        self.setFixedSize(720, 360)
+        self.setFixedSize(760, 360)
         self.setWindowTitle("PDFTools")
         self._message = random.choice(self.MESSAGES)
         self.message_timer = QTimer(self)
@@ -48,13 +48,10 @@ class StartupSplash(QWidget):
     def paintEvent(self, event):
         painter = QPainter(self)
         painter.setRenderHint(QPainter.Antialiasing, True)
-
-        # Та же палитра и компоновка, что у основного окна PDFTools.
         painter.setPen(Qt.NoPen)
         painter.setBrush(QColor("#171a21"))
         painter.drawRoundedRect(self.rect(), 12, 12)
 
-        # Левая панель повторяет Sidebar основного приложения.
         painter.setBrush(QColor("#202530"))
         painter.drawRoundedRect(0, 0, 205, self.height(), 12, 12)
         painter.setBrush(QColor("#171a21"))
@@ -73,7 +70,6 @@ class StartupSplash(QWidget):
         painter.setFont(QFont("Segoe UI", 9))
         painter.drawText(29, 165, f"Версия {__version__}")
 
-        # Правая область повторяет рабочую часть главного окна.
         painter.setPen(QColor("#e8eaf0"))
         painter.setFont(QFont("Segoe UI", 21, QFont.Bold))
         painter.drawText(239, 65, "Главная")
@@ -89,4 +85,3 @@ class StartupSplash(QWidget):
         painter.setFont(QFont("Segoe UI", 10))
         painter.drawText(239, self.height() - 38, "Подготавливаем рабочее пространство PDFTools…")
         painter.end()
-

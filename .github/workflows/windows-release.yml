@@ -44,7 +44,7 @@ jobs:
       - name: Run tests
         run: python -m pytest -q
       - name: Build application folder (PyInstaller onedir)
-        run: pyinstaller --noconfirm --clean --windowed --onedir --icon=PDFTools.ico --add-data "PDFTools.ico;." --add-data "splash.png;." --name PDFTools main.py
+        run: pyinstaller --noconfirm --clean --windowed --onedir --icon=PDFTools.ico --add-data "PDFTools.ico;." --name PDFTools main.py
       - name: Package portable folder
         shell: pwsh
         run: |
@@ -62,7 +62,7 @@ jobs:
         with:
           name: PDFTools-Windows-x64
           path: |
-            dist/PDFTools/
+            release/PDFTools/
             PDFTools_2.0_Windows_x64.zip
             SHA256SUMS.txt
           if-no-files-found: error
