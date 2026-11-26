@@ -2,9 +2,10 @@ from __future__ import annotations
 import sys
 import shutil
 import os
+import random
 from pathlib import Path
-from PySide6.QtCore import Qt, QThread, Signal, QSize, QPointF
-from PySide6.QtGui import QPixmap, QImage, QIcon, QPainter
+from PySide6.QtCore import Qt, QThread, Signal, QSize, QPointF, QTimer
+from PySide6.QtGui import QPixmap, QImage, QIcon, QPainter, QColor, QFont
 from PySide6.QtWidgets import (
     QApplication, QMainWindow, QWidget, QFrame, QVBoxLayout, QHBoxLayout, QLabel,
     QPushButton, QFileDialog, QStackedWidget, QTableWidget, QTableWidgetItem,
@@ -1132,26 +1133,82 @@ class MainWindow(QMainWindow):
 
 
 class StartupSplash(QWidget):
-    """Заставка PDFTools: отображается до полной инициализации главного окна."""
+    """Заставка PDFTools с анимированным индикатором и меняющимися фразами."""
+
+    MESSAGES = [
+        "Ну потерпи ещё чуточку...",
+        "Загружаем тяжёлую артиллерию для PDF…",
+        "Проверяем, не убежали ли ваши документы…",
+        "Собираем пиксели в кучку…",
+        "Почти готово. Не переключайтесь!",
+        "PDFTools просыпается. Кофе ему не предлагать!",
+        "Ещё немного — и можно работать!",
+        "Раскладываем ваши PDF по полочкам…",
+        "Упс долго гружусь.... Солтех занялся исправлением... ожидайтеееееее",
+    ]
 
     def __init__(self):
         super().__init__(None, Qt.SplashScreen | Qt.FramelessWindowHint | Qt.WindowStaysOnTopHint)
-        pixmap = QPixmap(resource_path("splash.png"))
-        if pixmap.isNull():
-            raise FileNotFoundError("Не найден файл заставки splash.png")
-        self.setFixedSize(pixmap.size())
+        self.pixmap = QPixmap(resource_path("splash.png"))
+        if self.pixmap.isNull():
+            raise FileNotFoundError("Не удалось загрузить встроенное изображение заставки splash.png")
+        self.setFixedSize(self.pixmap.size())
         self.setWindowTitle("PDFTools")
-        layout = QVBoxLayout(self)
-        layout.setContentsMargins(0, 0, 0, 0)
-        image = QLabel()
-        image.setPixmap(pixmap)
-        image.setFixedSize(pixmap.size())
-        layout.addWidget(image)
+        self._message = random.choice(self.MESSAGES)
+        self._bar_x = 0
+        self._bar_direction = 1
+
+        self.animation_timer = QTimer(self)
+        self.animation_timer.timeout.connect(self._advance_animation)
+        self.animation_timer.start(25)
+
+        self.message_timer = QTimer(self)
+        self.message_timer.timeout.connect(self._change_message)
+        self.message_timer.start(2800)
+
         screen = QApplication.primaryScreen()
         if screen:
             area = screen.availableGeometry()
             self.move(area.center() - self.rect().center())
 
+    def _advance_animation(self):
+        segment_width = 250
+        limit = max(0, self.width() - 94 - segment_width)
+        self._bar_x += 12 * self._bar_direction
+        if self._bar_x >= limit:
+            self._bar_x = limit
+            self._bar_direction = -1
+        elif self._bar_x <= 0:
+            self._bar_x = 0
+            self._bar_direction = 1
+        self.update()
+
+    def _change_message(self):
+        choices = [message for message in self.MESSAGES if message != self._message]
+        self._message = random.choice(choices)
+        self.update()
+
+    def paintEvent(self, event):
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.Antialiasing, True)
+        painter.drawPixmap(0, 0, self.pixmap)
+
+        # Перерисовываем только заголовок, сохраняя исходный дизайн заставки.
+        painter.fillRect(44, 88, self.width() - 88, 31, QColor("#17222e"))
+        font = QFont("Arial", 17)
+        font.setBold(True)
+        painter.setFont(font)
+        painter.setPen(QColor("#f4f6f8"))
+        painter.drawText(46, 111, self._message)
+
+        # Движущийся сегмент на исходной дорожке индикатора.
+        track_x, track_y, track_width, track_height = 47, 165, self.width() - 94, 8
+        painter.setPen(Qt.NoPen)
+        painter.setBrush(QColor("#3c4b59"))
+        painter.drawRoundedRect(track_x, track_y, track_width, track_height, 4, 4)
+        painter.setBrush(QColor("#45b9a8"))
+        painter.drawRoundedRect(track_x + self._bar_x, track_y, 250, track_height, 4, 4)
+        painter.end()
 
 
 def main():
@@ -1163,7 +1220,7 @@ def main():
     splash.show()
     app.processEvents()
 
-    window=MainWindow()
+    window = MainWindow()
     window.show()
     app.processEvents()
     splash.close()
