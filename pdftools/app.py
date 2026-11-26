@@ -5,7 +5,7 @@ import os
 import random
 from pathlib import Path
 from PySide6.QtCore import Qt, QThread, Signal, QSize, QPointF, QTimer
-from PySide6.QtGui import QPixmap, QImage, QIcon, QPainter, QColor, QFont
+from PySide6.QtGui import QPixmap, QImage, QIcon, QPainter, QColor, QFont, QLinearGradient
 from PySide6.QtWidgets import (
     QApplication, QMainWindow, QWidget, QFrame, QVBoxLayout, QHBoxLayout, QLabel,
     QPushButton, QFileDialog, QStackedWidget, QTableWidget, QTableWidgetItem,
@@ -1158,55 +1158,36 @@ class MainWindow(QMainWindow):
 
 
 class StartupSplash(QWidget):
-    """Заставка PDFTools с анимированным индикатором и меняющимися фразами."""
+    """Самодостаточная заставка PDFTools: фон рисуется кодом, фразы меняются автоматически."""
 
     MESSAGES = [
-        "Ну потерпи ещё чуточку...",
-        "Загружаем тяжёлую артиллерию для PDF…",
-        "Проверяем, не убежали ли ваши документы…",
-        "Собираем пиксели в кучку…",
+        "Ну потерпи ещё чуточку…",
+        "Загружаем тяжёлую артиллерию для PDF",
+        "Проверяем, не убежали ли ваши документы",
+        "Собираем пиксели в кучку",
         "Почти готово. Не переключайтесь!",
         "PDFTools просыпается. Кофе ему не предлагать!",
         "Ещё немного — и можно работать!",
-        "Раскладываем ваши PDF по полочкам…",
-        "Упс долго гружусь.... Солтех занялся исправлением... ожидайтеееееее",
+        "Раскладываем ваши PDF по полочкам",
+        "УПС… задумались. Уже исправляем!",
+        "Солтех на связи. Наводим порядок!",
+        "Подготавливаем инструменты для работы",
+        "Сейчас всё будет красиво!",
     ]
 
     def __init__(self):
         super().__init__(None, Qt.SplashScreen | Qt.FramelessWindowHint | Qt.WindowStaysOnTopHint)
-        self.pixmap = QPixmap(resource_path("splash.png"))
-        if self.pixmap.isNull():
-            raise FileNotFoundError("Не удалось загрузить встроенное изображение заставки splash.png")
-        self.setFixedSize(self.pixmap.size())
+        self.setFixedSize(720, 360)
         self.setWindowTitle("PDFTools")
         self._message = random.choice(self.MESSAGES)
-        self._bar_x = 0
-        self._bar_direction = 1
-
-        self.animation_timer = QTimer(self)
-        self.animation_timer.timeout.connect(self._advance_animation)
-        self.animation_timer.start(25)
-
         self.message_timer = QTimer(self)
         self.message_timer.timeout.connect(self._change_message)
-        self.message_timer.start(2800)
+        self.message_timer.start(2600)
 
         screen = QApplication.primaryScreen()
         if screen:
             area = screen.availableGeometry()
             self.move(area.center() - self.rect().center())
-
-    def _advance_animation(self):
-        segment_width = 250
-        limit = max(0, self.width() - 94 - segment_width)
-        self._bar_x += 12 * self._bar_direction
-        if self._bar_x >= limit:
-            self._bar_x = limit
-            self._bar_direction = -1
-        elif self._bar_x <= 0:
-            self._bar_x = 0
-            self._bar_direction = 1
-        self.update()
 
     def _change_message(self):
         choices = [message for message in self.MESSAGES if message != self._message]
@@ -1216,23 +1197,40 @@ class StartupSplash(QWidget):
     def paintEvent(self, event):
         painter = QPainter(self)
         painter.setRenderHint(QPainter.Antialiasing, True)
-        painter.drawPixmap(0, 0, self.pixmap)
 
-        # Перерисовываем только заголовок, сохраняя исходный дизайн заставки.
-        painter.fillRect(44, 88, self.width() - 88, 31, QColor("#17222e"))
-        font = QFont("Arial", 17)
-        font.setBold(True)
-        painter.setFont(font)
-        painter.setPen(QColor("#f4f6f8"))
-        painter.drawText(46, 111, self._message)
-
-        # Движущийся сегмент на исходной дорожке индикатора.
-        track_x, track_y, track_width, track_height = 47, 165, self.width() - 94, 8
+        # Фон и декоративные элементы рисуются напрямую: внешние PNG не требуются.
+        gradient = QLinearGradient(0, 0, self.width(), self.height())
+        gradient.setColorAt(0.0, QColor("#101b2b"))
+        gradient.setColorAt(0.55, QColor("#18364a"))
+        gradient.setColorAt(1.0, QColor("#087f83"))
         painter.setPen(Qt.NoPen)
-        painter.setBrush(QColor("#3c4b59"))
-        painter.drawRoundedRect(track_x, track_y, track_width, track_height, 4, 4)
-        painter.setBrush(QColor("#45b9a8"))
-        painter.drawRoundedRect(track_x + self._bar_x, track_y, 250, track_height, 4, 4)
+        painter.setBrush(gradient)
+        painter.drawRoundedRect(self.rect(), 22, 22)
+
+        painter.setBrush(QColor(255, 255, 255, 13))
+        painter.drawEllipse(520, -115, 330, 330)
+        painter.drawEllipse(-130, 245, 280, 280)
+
+        painter.setPen(QColor("#54d6c5"))
+        painter.setFont(QFont("Arial", 15, QFont.Bold))
+        painter.drawText(48, 62, "PDFTOOLS")
+
+        painter.setPen(QColor("#ffffff"))
+        painter.setFont(QFont("Arial", 36, QFont.Bold))
+        painter.drawText(46, 145, "Работаем с PDF")
+        
+        painter.setPen(QColor("#b8d4df"))
+        painter.setFont(QFont("Arial", 15))
+        painter.drawText(49, 181, "Инструменты для документов — в одном месте")
+
+        painter.setPen(QColor("#ffffff"))
+        painter.setFont(QFont("Arial", 17, QFont.DemiBold))
+        message_rect = self.rect().adjusted(48, 218, -48, -58)
+        painter.drawText(message_rect, Qt.AlignLeft | Qt.AlignVCenter | Qt.TextWordWrap, self._message)
+
+        painter.setPen(QColor(255, 255, 255, 105))
+        painter.setFont(QFont("Arial", 9))
+        painter.drawText(49, self.height() - 24, f"PDFTools  •  версия {__version__}")
         painter.end()
 
 
