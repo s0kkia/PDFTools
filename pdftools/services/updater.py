@@ -147,9 +147,12 @@ def download_and_verify(release: dict, progress=None) -> Path:
     try:
         with zipfile.ZipFile(archive) as zipped:
             root = extracted.resolve()
+            bad_member = zipped.testzip()
+            if bad_member:
+                raise RuntimeError(f"Архив повреждён: {bad_member}")
             for member in zipped.infolist():
                 # ZIP names may use Windows separators even when validated on another OS.
-                normalized = member.filename.replace("\\\\", "/")
+                normalized = member.filename.replace("\\", "/")
                 parts = normalized.split("/")
                 if normalized.startswith("/") or (parts and ":" in parts[0]) or ".." in parts:
                     raise RuntimeError("Архив содержит недопустимый путь. Установка отменена.")
@@ -181,7 +184,7 @@ def cleanup_download(work: Path) -> None:
 
 def launch_update(work: Path, install_dir: Path, process_id: int) -> Path:
     """Install a verified update, retaining exactly one previous application version."""
-    if os.name != "nt":
+    if not _is_windows():
         raise RuntimeError("Автоматическая установка доступна только в Windows.")
 
     work = work.resolve()
