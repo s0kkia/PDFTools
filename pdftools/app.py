@@ -1,8 +1,9 @@
 from __future__ import annotations
 import sys
 import shutil
+import os
 from pathlib import Path
-from PySide6.QtCore import Qt, QThread, Signal, QSize, QPointF
+from PySide6.QtCore import Qt, QThread, Signal, QSize, QPointF, QTimer
 from PySide6.QtGui import QPixmap, QImage, QIcon, QPainter
 from PySide6.QtWidgets import (
     QApplication, QMainWindow, QWidget, QFrame, QVBoxLayout, QHBoxLayout, QLabel,
@@ -39,11 +40,28 @@ class Job(QThread):
             self.finished_one.emit(exc)
 
 
+class UpdateDownloadJob(QThread):
+    progress = Signal(int, int)
+    finished_one = Signal(object)
+
+    def __init__(self, release):
+        super().__init__()
+        self.release = release
+
+    def run(self):
+        try:
+            result = updater.download_and_verify(self.release,
+                lambda received, total: self.progress.emit(received, total))
+            self.finished_one.emit(result)
+        except Exception as exc:
+            self.finished_one.emit(exc)
+
+
 class UpdateDialog(QDialog):
     def __init__(self, parent=None):
         super().__init__(parent)
         self.setWindowTitle("Обновление PDFTools")
-        self.setMinimumWidth(440)
+        self.setMinimumWidth(480)
         layout = QVBoxLayout(self)
         self.status = QLabel("Проверка доступной версии…")
         self.progress = QProgressBar()
@@ -53,7 +71,15 @@ class UpdateDialog(QDialog):
         layout.addWidget(self.status)
         layout.addWidget(self.progress)
         layout.addWidget(self.detail)
+        self.action_btn = QPushButton("Скачать и установить")
+        self.action_btn.setEnabled(False)
+        self.action_btn.clicked.connect(self.download_update)
+        layout.addWidget(self.action_btn)
+        self.close_btn = QPushButton("Закрыть")
+        self.close_btn.clicked.connect(self.reject)
+        layout.addWidget(self.close_btn)
         self.release = None
+        self.download_job = None
         self.worker = Job(updater.latest_release)
         self.worker.finished_one.connect(self.on_release)
         self.worker.start()
@@ -64,17 +90,66 @@ class UpdateDialog(QDialog):
             self.detail.setText(str(result))
             return
         self.release = result
-        tag = result.get("tag_name", "")
-        self.status.setText(f"Последняя опубликованная версия: {tag}")
-        assets = result.get("assets", [])
-        installers = [a for a in assets if a.get("name", "").lower().endswith((".exe", ".msi"))]
-        if not installers:
-            self.detail.setText("Релиз найден, но установочный EXE/MSI пока не приложен.")
+        latest = result.get("tag_name", "").lstrip("v")
+        current = __version__.lstrip("v")
+        self.status.setText(f"Установленная версия: {__version__} · Последняя версия: {result.get('tag_name', 'неизвестно')}")
+        if not updater.is_newer(latest, current):
+            self.detail.setText("У вас установлена последняя версия PDFTools.")
+            self.action_btn.setVisible(False)
+            self.progress.setValue(100)
             return
-        self.asset = installers[0]
-        self.detail.setText(f"Найден установщик: {self.asset['name']}")
+        assets = {a.get("name"): a for a in result.get("assets", [])}
+        if updater.PACKAGE_NAME not in assets or updater.CHECKSUM_NAME not in assets:
+            self.detail.setText("Релиз найден, но в нём отсутствует архив программы или файл контрольной суммы.")
+            return
+        self.detail.setText("Доступно обновление. Настройки, история и библиотека штампов сохраняются.")
+        self.action_btn.setEnabled(True)
+
+    def download_update(self):
+        if not self.release:
+            return
+        self.action_btn.setEnabled(False)
+        self.close_btn.setEnabled(False)
+        self.status.setText("Загрузка обновления…")
+        self.detail.setText("Загрузка архива и проверка SHA256.")
+        self.progress.setRange(0, 100)
+        self.download_job = UpdateDownloadJob(self.release)
+        self.download_job.progress.connect(self.on_download_progress)
+        self.download_job.finished_one.connect(self.on_download_finished)
+        self.download_job.start()
+
+    def on_download_progress(self, received, total):
+        if total > 0:
+            self.progress.setValue(int(received * 100 / total))
+            self.detail.setText(f"Загружено {received / 1024 / 1024:.1f} из {total / 1024 / 1024:.1f} МБ")
+        else:
+            self.progress.setRange(0, 0)
+            self.detail.setText(f"Загружено {received / 1024 / 1024:.1f} МБ")
+
+    def on_download_finished(self, result):
+        if isinstance(result, Exception):
+            self.status.setText("Не удалось загрузить обновление")
+            self.detail.setText(str(result))
+            self.action_btn.setEnabled(True)
+            self.close_btn.setEnabled(True)
+            return
         self.progress.setValue(100)
-        self.status.setText("Обновление доступно. Скачивание и запуск установщика будут добавлены в следующем релизном цикле.")
+        answer = QMessageBox.question(self, "Установка обновления",
+            "АРХИВ ЗАГРУЖЕН И ПРОВЕРЕН. НЕ ПЕРЕЖИВАЙТЕ — ПЕРЕЗАГРУЗКА МОЖЕТ БЫТЬ ДОЛГОЙ. PDFTOOLS НЕ ЗАВИС, А ОБНОВЛЯЕТСЯ. САМОЕ ВРЕМЯ ДОПИТЬ КОФЕ! Продолжить?",
+            QMessageBox.Yes | QMessageBox.No, QMessageBox.Yes)
+        if answer != QMessageBox.Yes:
+            self.status.setText("Обновление загружено, установка отложена.")
+            self.detail.setText(str(result))
+            self.close_btn.setEnabled(True)
+            return
+        try:
+            updater.launch_update(result, Path(sys.executable).resolve().parent, os.getpid())
+        except Exception as exc:
+            QMessageBox.critical(self, "Ошибка обновления", str(exc))
+            self.close_btn.setEnabled(True)
+            return
+        self.accept()
+        QApplication.quit()
 
 
 class StampGraphicsView(QGraphicsView):
@@ -1038,6 +1113,44 @@ class MainWindow(QMainWindow):
             for col,value in enumerate(record):
                 self.history_table.setItem(row,col,QTableWidgetItem(str(value or "")))
 
+    def check_auto_updates(self):
+        """Check for updates silently, at most once every 14 days."""
+        if os.name != "nt" or not getattr(sys, "frozen", False):
+            return
+        if not updater.auto_check_due(interval_days=14):
+            return
+        self._silent_update_probe = Job(updater.latest_release)
+        self._silent_update_probe.finished_one.connect(self._on_silent_update_probe)
+        self._silent_update_probe.start()
+
+    def _on_silent_update_probe(self, release):
+        if isinstance(release, Exception):
+            updater._write_update_log(f"ОШИБКА проверки обновления: {release}")
+            return
+        latest = release.get("tag_name", "").lstrip("v")
+        if not updater.is_newer(latest, __version__):
+            updater.mark_auto_check()
+            return
+        assets = {item.get("name"): item for item in release.get("assets", [])}
+        if updater.PACKAGE_NAME not in assets or updater.CHECKSUM_NAME not in assets:
+            updater._write_update_log("ОШИБКА: в новом релизе отсутствует ZIP или SHA256SUMS.txt; проверка будет повторена при следующем запуске.")
+            return
+        updater._write_update_log(f"Обнаружено обновление {release.get('tag_name')}; начинается фоновая загрузка.")
+        self._silent_update_download = UpdateDownloadJob(release)
+        self._silent_update_download.finished_one.connect(self._on_silent_update_downloaded)
+        self._silent_update_download.start()
+
+    def _on_silent_update_downloaded(self, work):
+        if isinstance(work, Exception):
+            updater._write_update_log(f"ОШИБКА фоновой загрузки: {work}")
+            return
+        try:
+            updater.launch_update(work, Path(sys.executable).resolve().parent, os.getpid())
+            updater._write_update_log("Проверка SHA256 пройдена. Установщик запущен; приложение перезапускается.")
+            QApplication.quit()
+        except Exception as exc:
+            updater._write_update_log(f"ОШИБКА запуска установки: {exc}")
+
     def check_updates(self):
         dialog=UpdateDialog(self); dialog.exec()
 
@@ -1048,4 +1161,5 @@ def main():
     app.setStyleSheet(DARK_QSS)
     window=MainWindow()
     window.show()
+    QTimer.singleShot(7000, window.check_auto_updates)
     sys.exit(app.exec())
