@@ -541,8 +541,12 @@ class StampEditorDialog(QDialog):
                     if stamp_pix.isNull():
                         raise FileNotFoundError(f"Не найден штамп: {placement['path']}")
                     height = width * stamp_pix.height() / max(1, stamp_pix.width())
+                    # Координаты размещения сняты с отрисованной (визуально повёрнутой)
+                    # страницы. При сохранении переводим их обратно в PDF-координаты
+                    # и компенсируем /Rotate, чтобы печать не становилась боком.
+                    from pdftools.core.operations import insert_image_at_visual_rect
                     rect = pymupdf.Rect(x, y, x + width, y + height)
-                    page.insert_image(rect, filename=placement["path"], overlay=True)
+                    insert_image_at_visual_rect(page, placement["path"], rect, overlay=True)
             target.parent.mkdir(parents=True, exist_ok=True)
             out_doc.save(target, garbage=4, deflate=True)
         finally:
