@@ -1125,14 +1125,15 @@ class MainWindow(QMainWindow):
 
     def _on_silent_update_probe(self, release):
         if isinstance(release, Exception):
+            updater._write_update_log(f"ОШИБКА проверки обновления: {release}")
             return
-        updater.mark_auto_check()
         latest = release.get("tag_name", "").lstrip("v")
         if not updater.is_newer(latest, __version__):
+            updater.mark_auto_check()
             return
         assets = {item.get("name"): item for item in release.get("assets", [])}
         if updater.PACKAGE_NAME not in assets or updater.CHECKSUM_NAME not in assets:
-            updater._write_update_log("ОШИБКА: в новом релизе отсутствует ZIP или SHA256SUMS.txt.")
+            updater._write_update_log("ОШИБКА: в новом релизе отсутствует ZIP или SHA256SUMS.txt; проверка будет повторена при следующем запуске.")
             return
         updater._write_update_log(f"Обнаружено обновление {release.get('tag_name')}; начинается фоновая загрузка.")
         self._silent_update_download = UpdateDownloadJob(release)
