@@ -18,6 +18,10 @@ CHECKSUM_NAME = "SHA256SUMS.txt"
 USER_AGENT = "PDFTools-Updater"
 
 
+def _is_windows() -> bool:
+    return os.name == "nt"
+
+
 def latest_release(timeout: int = 20) -> dict:
     request = Request(
         f"https://api.github.com/repos/{REPOSITORY}/releases/latest",
@@ -110,7 +114,7 @@ def download_and_verify(release: dict, progress=None) -> Path:
     checksum_asset = assets.get(CHECKSUM_NAME)
     if not package or not checksum_asset:
         raise RuntimeError("В релизе отсутствует ZIP программы или SHA256SUMS.txt.")
-    if os.name != "nt":
+    if not _is_windows():
         raise RuntimeError("Установка обновлений поддерживается только в Windows.")
 
     version = release.get("tag_name", "unknown").lstrip("v")
@@ -133,27 +137,38 @@ def download_and_verify(release: dict, progress=None) -> Path:
         if len(parts) >= 2 and parts[-1].strip("*").lower() == PACKAGE_NAME.lower():
             expected = parts[0].lower()
             break
-    if not expected or sha256(archive) != expected:
+    if not expected or not re.fullmatch(r"[0-9a-fA-F]{64}", expected) or sha256(archive) != expected:
         _write_update_log(f"ОШИБКА SHA256; файлы оставлены: {work}")
-        raise RuntimeError(f"Контрольная сумма ZIP не совпадает. Файлы оставлены для диагностики: {work}")
+        raise RuntimeError(f"Контрольная сумма ZIP не совпадает или имеет неверный формат. Файлы оставлены для диагностики: {work}")
     _write_update_log(f"Загрузка {version} завершена; SHA256 проверена; архив: {archive}")
 
     extracted = work / "extracted"
     extracted.mkdir()
-    with zipfile.ZipFile(archive) as zipped:
-        root = extracted.resolve()
-        for member in zipped.infolist():
-            target = (extracted / member.filename).resolve()
-            if target != root and root not in target.parents:
-                raise RuntimeError("Архив содержит недопустимый путь. Установка отменена.")
-        zipped.extractall(extracted)
+    try:
+        with zipfile.ZipFile(archive) as zipped:
+            root = extracted.resolve()
+            for member in zipped.infolist():
+                # ZIP names may use Windows separators even when validated on another OS.
+                normalized = member.filename.replace("\\\\", "/")
+                parts = normalized.split("/")
+                if normalized.startswith("/") or (parts and ":" in parts[0]) or ".." in parts:
+                    raise RuntimeError("Архив содержит недопустимый путь. Установка отменена.")
+                mode = (member.external_attr >> 16) & 0xFFFF
+                if (mode & 0o170000) == 0o120000:
+                    raise RuntimeError("Архив содержит символическую ссылку. Установка отменена.")
+                target = (extracted / normalized).resolve()
+                if target != root and root not in target.parents:
+                    raise RuntimeError("Архив содержит недопустимый путь. Установка отменена.")
+            zipped.extractall(extracted)
 
-    app_folder = extracted / "PDFTools"
-    if not (app_folder / "PDFTools.exe").is_file():
-        _write_update_log(f"ОШИБКА: в архиве отсутствует PDFTools.exe; архив: {archive}")
-        raise RuntimeError(f"В архиве не найдена PDFTools/PDFTools.exe. Архив сохранён: {archive}")
-    _write_update_log(f"Архив распакован; подготовлено к установке: {app_folder}")
-    return work
+        app_folder = extracted / "PDFTools"
+        if not (app_folder / "PDFTools.exe").is_file():
+            raise RuntimeError("В архиве не найдена PDFTools/PDFTools.exe.")
+        _write_update_log(f"Архив распакован; подготовлено к установке: {app_folder}")
+        return work
+    except Exception as exc:
+        _write_update_log(f"ОШИБКА проверки/распаковки архива: {exc}; архив сохранён: {archive}")
+        raise
 
 
 def cleanup_download(work: Path) -> None:
