@@ -1153,9 +1153,6 @@ class MainWindow(QMainWindow):
     def check_updates(self):
         dialog=UpdateDialog(self); dialog.exec()
 
-    def check_updates(self):
-        dialog=UpdateDialog(self); dialog.exec()
-
 
 def main():
     app=QApplication(sys.argv)
