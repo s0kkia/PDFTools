@@ -4,28 +4,28 @@ import sys
 from PySide6.QtCore import QTimer
 from PySide6.QtWidgets import QApplication
 
-
-def _close_boot_splash() -> None:
-    """Close PyInstaller's bootloader splash after the main window is visible."""
-    try:
-        import pyi_splash
-        if pyi_splash.is_alive():
-            pyi_splash.close()
-    except Exception:
-        pass
+from pdftools.ui.splash import StartupSplash
 
 
 def main() -> None:
+    # Создаём и показываем заставку до импорта тяжёлых модулей PDFTools.
     app = QApplication(sys.argv)
     app.setStyle("Fusion")
+    splash = StartupSplash()
+    splash.show()
+    app.processEvents()
+
+    # Только теперь загружаем основное приложение и PDF-библиотеки.
     from pdftools.ui.theme import DARK_QSS
     app.setStyleSheet(DARK_QSS)
     from pdftools.app import MainWindow
 
     window = MainWindow()
     window.show()
-    # Keep the bootloader splash for two seconds after the application window appears.
-    QTimer.singleShot(2000, _close_boot_splash)
+    app.processEvents()
+
+    # Заставка остаётся ещё 2 секунды после отображения главного окна.
+    QTimer.singleShot(2000, splash.close)
     QTimer.singleShot(3500, window.check_auto_updates)
     sys.exit(app.exec())
 
