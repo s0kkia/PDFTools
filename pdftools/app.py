@@ -3,7 +3,7 @@ import sys
 import shutil
 import os
 from pathlib import Path
-from PySide6.QtCore import Qt, QThread, Signal, QSize, QPointF
+from PySide6.QtCore import Qt, QThread, Signal, QSize, QPointF, QTimer
 from PySide6.QtGui import QPixmap, QImage, QIcon, QPainter
 from PySide6.QtWidgets import (
     QApplication, QMainWindow, QWidget, QFrame, QVBoxLayout, QHBoxLayout, QLabel,
@@ -1120,6 +1120,43 @@ class MainWindow(QMainWindow):
             for col,value in enumerate(record):
                 self.history_table.setItem(row,col,QTableWidgetItem(str(value or "")))
 
+    def check_auto_updates(self):
+        """Check for updates silently, at most once every 14 days."""
+        if os.name != "nt" or not getattr(sys, "frozen", False):
+            return
+        if not updater.auto_check_due(interval_days=14):
+            return
+        self._silent_update_probe = Job(updater.latest_release)
+        self._silent_update_probe.finished_one.connect(self._on_silent_update_probe)
+        self._silent_update_probe.start()
+
+    def _on_silent_update_probe(self, release):
+        if isinstance(release, Exception):
+            return
+        updater.mark_auto_check()
+        latest = release.get("tag_name", "").lstrip("v")
+        if not updater.is_newer(latest, __version__):
+            return
+        assets = {item.get("name"): item for item in release.get("assets", [])}
+        if updater.PACKAGE_NAME not in assets or updater.CHECKSUM_NAME not in assets:
+            updater._write_update_log("ОШИБКА: в новом релизе отсутствует ZIP или SHA256SUMS.txt.")
+            return
+        updater._write_update_log(f"Обнаружено обновление {release.get('tag_name')}; начинается фоновая загрузка.")
+        self._silent_update_download = UpdateDownloadJob(release)
+        self._silent_update_download.finished_one.connect(self._on_silent_update_downloaded)
+        self._silent_update_download.start()
+
+    def _on_silent_update_downloaded(self, work):
+        if isinstance(work, Exception):
+            updater._write_update_log(f"ОШИБКА фоновой загрузки: {work}")
+            return
+        try:
+            updater.launch_update(work, Path(sys.executable).resolve().parent, os.getpid())
+            updater._write_update_log("Проверка SHA256 пройдена. Установщик запущен; приложение перезапускается.")
+            QApplication.quit()
+        except Exception as exc:
+            updater._write_update_log(f"ОШИБКА запуска установки: {exc}")
+
     def check_updates(self):
         dialog=UpdateDialog(self); dialog.exec()
 
@@ -1130,4 +1167,6 @@ def main():
     app.setStyleSheet(DARK_QSS)
     window=MainWindow()
     window.show()
+    # Delay network activity until the main window is responsive.
+    QTimer.singleShot(7000, window.check_auto_updates)
     sys.exit(app.exec())
