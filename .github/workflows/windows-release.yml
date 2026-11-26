@@ -1,10 +1,19 @@
 name: Build Windows release
 
 on:
+  pull_request:
+    branches:
+      - main
   push:
     tags:
       - "v*"
   workflow_dispatch:
+    inputs:
+      release_tag:
+        description: "Тег существующего релиза для публикации (например, v2.0.1)"
+        required: true
+        default: "v2.0.0"
+        type: string
 
 permissions:
   contents: write
@@ -14,6 +23,15 @@ jobs:
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v4
+      - name: Set application version from release tag
+        if: startsWith(github.ref, 'refs/tags/') || inputs.release_tag != ''
+        shell: pwsh
+        env:
+          INPUTS_RELEASE_TAG: ${{ inputs.release_tag }}
+        run: |
+          if ($env:INPUTS_RELEASE_TAG) { $tag = $env:INPUTS_RELEASE_TAG } else { $tag = $env:GITHUB_REF_NAME }
+          $version = $tag.TrimStart('v')
+          Set-Content -Path pdftools/__init__.py -Value ('__version__ = "' + $version + '"') -Encoding utf8
       - uses: actions/setup-python@v5
         with:
           python-version: "3.13"
@@ -38,12 +56,12 @@ jobs:
       - name: Generate checksum
         shell: pwsh
         run: |
-          $hash = (Get-FileHash dist/PDFTools/PDFTools.exe -Algorithm SHA256).Hash.ToLower()
-          "PDFTools/PDFTools.exe  $hash" | Out-File -Encoding ascii SHA256SUMS.txt
+          $hash = (Get-FileHash PDFTools_2.0_Windows_x64.zip -Algorithm SHA256).Hash.ToLower()
+          "$hash  PDFTools_2.0_Windows_x64.zip" | Out-File -Encoding ascii SHA256SUMS.txt
       - name: Upload build artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: PDFTools-2.0-Windows-x64
+          name: PDFTools-2.0.0-Windows-x64
           path: |
             dist/PDFTools/
             PDFTools_2.0_Windows_x64.zip
@@ -51,9 +69,11 @@ jobs:
           if-no-files-found: error
           retention-days: 30
       - name: Publish GitHub Release
-        if: startsWith(github.ref, 'refs/tags/')
+        if: startsWith(github.ref, 'refs/tags/') || inputs.release_tag != ''
         uses: softprops/action-gh-release@v2
         with:
+          tag_name: ${{ inputs.release_tag || github.ref_name }}
+          overwrite_files: true
           generate_release_notes: true
           files: |
             PDFTools_2.0_Windows_x64.zip
