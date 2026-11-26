@@ -3,7 +3,7 @@ from PIL import Image, ImageDraw, ImageFont
 
 OUT = Path("build_assets/splash.png")
 OUT.parent.mkdir(parents=True, exist_ok=True)
-W, H = 900, 250
+W, H = 760, 360
 im = Image.new("RGB", (W, H), "#171a21")
 d = ImageDraw.Draw(im)
 
@@ -16,6 +16,6 @@ d.text((29, 155), "Запуск приложения", fill="#9ca7b8", font=Imag
 
 d.text((240, 28), "Главная", fill="#e8eaf0", font=ImageFont.truetype("C:/Windows/Fonts/segoeuib.ttf", 25))
 d.line((240, 82, 870, 82), fill="#394355", width=1)
-d.text((240, 214), "Подготавливаем рабочее пространство PDFTools…", fill="#9ca7b8", font=ImageFont.truetype("C:/Windows/Fonts/segoeui.ttf", 12))
+d.text((240, 320), "Подготавливаем рабочее пространство PDFTools…", fill="#9ca7b8", font=ImageFont.truetype("C:/Windows/Fonts/segoeui.ttf", 12))
 im.save(OUT)
 print(f"Created {OUT} ({W}x{H})")
