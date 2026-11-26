@@ -25,8 +25,6 @@ splash = Splash(
     text_font="Segoe UI",
     text_default="Ну потерпи ещё чуточку…",
     always_on_top=True,
-    full_tk=True,
-    max_img_size=None,
     center="active",
 )
 
