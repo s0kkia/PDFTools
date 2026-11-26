@@ -43,18 +43,17 @@ jobs:
           pip install pyinstaller pytest
       - name: Run tests
         run: python -m pytest -q
-      - uses: ilammy/msvc-dev-cmd@v1
-      - name: Build lightweight native launcher
+      - name: Generate splash image
+        run: |
+          pip install pillow
+          python tools/create_splash.py
+      - name: Build single-file application with native splash
+        run: pyinstaller --noconfirm --clean PDFTools.spec
+      - name: Package portable application
         shell: pwsh
         run: |
           New-Item -ItemType Directory -Force release/PDFTools | Out-Null
-          cl /nologo /O2 /DUNICODE /D_UNICODE /utf-8 launcher/PDFToolsLauncher.cpp /link gdiplus.lib user32.lib gdi32.lib /SUBSYSTEM:WINDOWS /OUT:release/PDFTools/PDFTools.exe
-      - name: Build application folder (PyInstaller onedir)
-        run: pyinstaller --noconfirm --clean --windowed --onedir --icon=PDFTools.ico --add-data "PDFTools.ico;." --name PDFToolsApp main.py
-      - name: Package portable folder
-        shell: pwsh
-        run: |
-          Copy-Item -Recurse dist/PDFToolsApp/* release/PDFTools/
+          Copy-Item dist/PDFTools.exe release/PDFTools/PDFTools.exe
           Copy-Item README.md release/README.txt
           Compress-Archive -Path release/* -DestinationPath PDFTools_2.0_Windows_x64.zip
       - name: Generate checksum
@@ -67,7 +66,7 @@ jobs:
         with:
           name: PDFTools-Windows-x64
           path: |
-            release/PDFTools/
+            release/PDFTools/PDFTools.exe
             PDFTools_2.0_Windows_x64.zip
             SHA256SUMS.txt
           if-no-files-found: error
