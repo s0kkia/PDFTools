@@ -65,10 +65,10 @@ class UpdateDownloadJob(QThread):
 
 
 class UpdateDialog(QDialog):
-    def __init__(self, parent=None, automatic=False):
+    def __init__(self, parent=None, automatic=False, release=None):
         super().__init__(parent)
         self.automatic = automatic
-        self.setWindowTitle("Обновление PDFTools")
+        self.setWindowTitle("УПС! ОБНОВА" if automatic else "Обновление PDFTools")
         self.setMinimumWidth(480)
         layout = QVBoxLayout(self)
         self.status = QLabel("Проверка доступной версии…")
@@ -90,9 +90,12 @@ class UpdateDialog(QDialog):
             self.close_btn.hide()
         self.release = None
         self.download_job = None
-        self.worker = Job(updater.latest_release)
-        self.worker.finished_one.connect(self.on_release)
-        self.worker.start()
+        if release is not None:
+            self.on_release(release)
+        else:
+            self.worker = Job(updater.latest_release)
+            self.worker.finished_one.connect(self.on_release)
+            self.worker.start()
 
     def on_release(self, result):
         if isinstance(result, Exception):
@@ -112,7 +115,7 @@ class UpdateDialog(QDialog):
         if updater.PACKAGE_NAME not in assets or updater.CHECKSUM_NAME not in assets:
             self.detail.setText("Релиз найден, но в нём отсутствует архив программы или файл контрольной суммы.")
             return
-        self.detail.setText("УПС! ОБНОВА. Нажмите ОК — загрузка и установка начнутся автоматически. Настройки, история и библиотека штампов сохраняются.")
+        self.detail.setText("Доступна новая версия PDFTools. Нажмите ОК — загрузка, проверка и установка пройдут автоматически. Настройки, история и библиотека штампов сохраняются.")
         self.action_btn.setEnabled(True)
 
     def download_update(self):
@@ -141,6 +144,7 @@ class UpdateDialog(QDialog):
             self.status.setText("Не удалось загрузить обновление")
             self.detail.setText(str(result))
             self.action_btn.setEnabled(True)
+            self.close_btn.show()
             self.close_btn.setEnabled(True)
             return
         self.progress.setValue(100)
@@ -163,6 +167,7 @@ class UpdateDialog(QDialog):
             self.detail.setText(f"Программа закроется. Журнал установки: {log_path}")
         except Exception as exc:
             QMessageBox.critical(self, "Ошибка обновления", str(exc))
+            self.close_btn.show()
             self.close_btn.setEnabled(True)
             return
         self.accept()
@@ -1131,6 +1136,22 @@ class MainWindow(QMainWindow):
             for col,value in enumerate(record):
                 self.history_table.setItem(row,col,QTableWidgetItem(str(value or "")))
 
+    def check_auto_updates(self):
+        if not updater.auto_check_due():
+            return
+        self._auto_update_worker = Job(updater.latest_release)
+        self._auto_update_worker.finished_one.connect(self.on_auto_update_probe)
+        self._auto_update_worker.start()
+
+    def on_auto_update_probe(self, result):
+        if isinstance(result, Exception):
+            return
+        updater.mark_auto_check()
+        latest = result.get("tag_name", "").lstrip("v")
+        if updater.is_newer(latest, __version__):
+            dialog = UpdateDialog(self, automatic=True, release=result)
+            dialog.exec()
+
     def check_updates(self):
         dialog=UpdateDialog(self); dialog.exec()
 
@@ -1228,4 +1249,5 @@ def main():
     window.show()
     app.processEvents()
     splash.close()
+    QTimer.singleShot(1500, window.check_auto_updates)
     sys.exit(app.exec())
