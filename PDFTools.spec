@@ -19,13 +19,15 @@ splash = Splash(
     "build_assets/splash.png",
     binaries=a.binaries,
     datas=a.datas,
-    text_pos=(240, 166),
+    text_pos=(240, 275),
     text_size=16,
     text_color="#e8eaf0",
     text_font="Segoe UI",
     text_default="Ну потерпи ещё чуточку…",
     always_on_top=True,
-    center="primary",
+    full_tk=True,
+    max_img_size=None,
+    center="active",
 )
 
 pyz = PYZ(a.pure)
