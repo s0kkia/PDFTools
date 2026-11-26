@@ -8,7 +8,7 @@ import shutil
 import subprocess
 import tempfile
 import zipfile
-from datetime import datetime
+from datetime import datetime, timedelta
 from pathlib import Path
 from urllib.request import Request, urlopen
 
@@ -36,6 +36,34 @@ def is_newer(latest: str, current: str) -> bool:
     a, b = _version_tuple(latest), _version_tuple(current)
     size = max(len(a), len(b))
     return a + (0,) * (size - len(a)) > b + (0,) * (size - len(b))
+
+
+def auto_check_due(last_checked: str | None = None, now: datetime | None = None, interval_days: int = 14) -> bool:
+    """Return True when the automatic release check is due."""
+    if last_checked is None:
+        marker = _updates_root() / "last_auto_check.txt"
+        try:
+            last_checked = marker.read_text(encoding="utf-8").strip() or None
+        except OSError:
+            last_checked = None
+    if not last_checked:
+        return True
+    try:
+        previous = datetime.fromisoformat(last_checked)
+    except (TypeError, ValueError):
+        return True
+    current = now or datetime.now(previous.tzinfo)
+    if previous.tzinfo is None and current.tzinfo is not None:
+        current = current.replace(tzinfo=None)
+    elif previous.tzinfo is not None and current.tzinfo is None:
+        current = current.replace(tzinfo=previous.tzinfo)
+    return current - previous >= timedelta(days=interval_days)
+
+
+def mark_auto_check(now: datetime | None = None) -> None:
+    marker = _updates_root() / "last_auto_check.txt"
+    marker.parent.mkdir(parents=True, exist_ok=True)
+    marker.write_text((now or datetime.now()).isoformat(timespec="seconds"), encoding="utf-8")
 
 
 def sha256(path: Path) -> str:

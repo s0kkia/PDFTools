@@ -65,8 +65,9 @@ class UpdateDownloadJob(QThread):
 
 
 class UpdateDialog(QDialog):
-    def __init__(self, parent=None):
+    def __init__(self, parent=None, automatic=False):
         super().__init__(parent)
+        self.automatic = automatic
         self.setWindowTitle("Обновление PDFTools")
         self.setMinimumWidth(480)
         layout = QVBoxLayout(self)
@@ -78,13 +79,15 @@ class UpdateDialog(QDialog):
         layout.addWidget(self.status)
         layout.addWidget(self.progress)
         layout.addWidget(self.detail)
-        self.action_btn = QPushButton("Скачать и установить")
+        self.action_btn = QPushButton("ОК" if automatic else "Скачать и установить")
         self.action_btn.setEnabled(False)
         self.action_btn.clicked.connect(self.download_update)
         layout.addWidget(self.action_btn)
         self.close_btn = QPushButton("Закрыть")
         self.close_btn.clicked.connect(self.reject)
         layout.addWidget(self.close_btn)
+        if automatic:
+            self.close_btn.hide()
         self.release = None
         self.download_job = None
         self.worker = Job(updater.latest_release)
@@ -109,7 +112,7 @@ class UpdateDialog(QDialog):
         if updater.PACKAGE_NAME not in assets or updater.CHECKSUM_NAME not in assets:
             self.detail.setText("Релиз найден, но в нём отсутствует архив программы или файл контрольной суммы.")
             return
-        self.detail.setText("Доступно обновление. Настройки, история и библиотека штампов сохраняются.")
+        self.detail.setText("УПС! ОБНОВА. Нажмите ОК — загрузка и установка начнутся автоматически. Настройки, история и библиотека штампов сохраняются.")
         self.action_btn.setEnabled(True)
 
     def download_update(self):
@@ -144,15 +147,16 @@ class UpdateDialog(QDialog):
         archive_path = result / updater.PACKAGE_NAME
         self.status.setText("Обновление скачано и проверено")
         self.detail.setText(f"Архив сохранён: {archive_path}")
-        answer = QMessageBox.question(self, "Установка обновления",
-            f"Архив загружен и SHA256 совпадает.\n\nФайл: {archive_path}\n\nПЕРЕЗАПУСК МОЖЕТ ЗАТЯНУТЬСЯ! НЕ ПУГАЙТЕСЬ — PDFTOOLS НЕ ЗАВИС, А ПРОСТО СОБИРАЕТСЯ С НОВЫМИ СИЛАМИ. 😄\n\nПродолжить?",
-            QMessageBox.Yes | QMessageBox.No, QMessageBox.Yes)
-        if answer != QMessageBox.Yes:
-            updater.cleanup_download(result)
-            self.status.setText("Установка отменена. Временные файлы удалены.")
-            self.detail.setText("Архив и распакованные файлы удалены. Журнал предыдущих обновлений сохранён.")
-            self.close_btn.setEnabled(True)
-            return
+        if not self.automatic:
+            answer = QMessageBox.question(self, "Установка обновления",
+                f"Архив загружен и SHA256 совпадает.\n\nФайл: {archive_path}\n\nПродолжить?",
+                QMessageBox.Yes | QMessageBox.No, QMessageBox.Yes)
+            if answer != QMessageBox.Yes:
+                updater.cleanup_download(result)
+                self.status.setText("Установка отменена. Временные файлы удалены.")
+                self.detail.setText("Архив и распакованные файлы удалены.")
+                self.close_btn.setEnabled(True)
+                return
         try:
             log_path = updater.launch_update(result, Path(sys.executable).resolve().parent, os.getpid())
             self.status.setText("Подготовка установки…")
