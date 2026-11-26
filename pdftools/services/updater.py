@@ -216,6 +216,7 @@ $oldInstall = '__OLD_INSTALL__'
 $newInstall = '__NEW_INSTALL__'
 $work = '__WORK__'
 $log = '__LOG__'
+$checkMarker = '__CHECK_MARKER__'
 
 function Write-Log($message) {
     $line = "$(Get-Date -Format o) $message"
@@ -270,6 +271,13 @@ try {
     }
     $newStarted = $true
     Write-Log "New version started successfully (PID $($newProcess.Id))."
+    try {
+        Set-Content -LiteralPath $checkMarker -Value (Get-Date -Format o) -Encoding UTF8
+        Write-Log "Automatic update check timestamp saved."
+    }
+    catch {
+        Write-Log "WARNING: could not save automatic update timestamp: $_"
+    }
 
     # Replace the previous backup only after the new version is confirmed running.
     Remove-Safe $previous
@@ -296,9 +304,8 @@ try {
 catch {
     Write-Log "UPDATE ERROR: $_"
     try {
-        if ($newStarted) {
-            Get-Process -Name 'PDFTools' -ErrorAction SilentlyContinue |
-                Stop-Process -Force -ErrorAction SilentlyContinue
+        if ($newProcess -and !$newProcess.HasExited) {
+            Stop-Process -Id $newProcess.Id -Force -ErrorAction SilentlyContinue
             Start-Sleep -Seconds 2
         }
         if ($oldMoved -and (Test-Path -LiteralPath $oldInstall)) {
@@ -326,6 +333,7 @@ catch {
         "__NEW_INSTALL__": str(new_install),
         "__WORK__": str(work),
         "__LOG__": str(log),
+        "__CHECK_MARKER__": str(updates_root / "last_auto_check.txt"),
     }
     for key, value in replacements.items():
         ps = ps.replace(key, value.replace("'", "''"))
