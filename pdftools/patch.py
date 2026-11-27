@@ -1021,6 +1021,7 @@ def _patch_app():
         self.setMinimumWidth(620)
         self.setMinimumHeight(360)
         self.status.setWordWrap(True)
+        self.status.setMinimumHeight(28)
         self.detail.setWordWrap(True)
         self.detail.setMinimumHeight(170)
         self.detail.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Expanding)
