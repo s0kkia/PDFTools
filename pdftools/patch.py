@@ -21,6 +21,7 @@ from PySide6.QtWidgets import (
     QListWidgetItem,
     QMessageBox,
     QProgressBar,
+    QSizePolicy,
     QVBoxLayout,
 )
 
@@ -1021,7 +1022,11 @@ def _patch_app():
         self.setMinimumHeight(360)
         self.status.setWordWrap(True)
         self.detail.setWordWrap(True)
-        self.detail.setMinimumHeight(110)
+        self.detail.setMinimumHeight(170)
+        self.detail.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Expanding)
+        layout = self.layout()
+        if layout is not None:
+            layout.setStretchFactor(self.detail, 1)
         self.resize(620, 360)
 
     def update_dialog_on_release(self, result):
@@ -1042,24 +1047,58 @@ def _patch_app():
         original_question = QMessageBox.question
 
         def question(parent, title, text, *args, **kwargs):
-            if isinstance(text, str) and "Архив загружен и SHA256 совпадает." in text:
-                prefix = "Архив загружен и SHA256 совпадает.\n\nФайл: "
-                if text.startswith(prefix):
-                    archive = text[len(prefix):].split("\n\nПродолжить?")[0]
-                    text = (
-                        "<div style='font-size:14pt; font-weight:600;'>"
-                        "Архив загружен и SHA256 совпадает.<br><br>"
-                        f"Файл: {escape(archive)}<br><br>"
-                        f"{escape(UPDATE_CONFIRM_NOTE)}<br><br>"
-                        "Продолжить?"
-                        "</div>"
-                    )
-                else:
-                    text = text.replace(
-                        "\n\nПродолжить?",
-                        f"\n\n{UPDATE_CONFIRM_NOTE}\n\nПродолжить?",
-                    )
-            return original_question(parent, title, text, *args, **kwargs)
+            if not (
+                isinstance(text, str)
+                and "Архив загружен и SHA256 совпадает." in text
+            ):
+                return original_question(parent, title, text, *args, **kwargs)
+
+            prefix = "Архив загружен и SHA256 совпадает.\n\nФайл: "
+            if text.startswith(prefix):
+                archive = text[len(prefix):].split("\n\nПродолжить?")[0]
+                text = (
+                    "<div style='font-size:15pt; font-weight:700;'>"
+                    "Архив загружен и SHA256 совпадает.<br><br>"
+                    f"Файл: {escape(archive)}<br><br>"
+                    f"{escape(UPDATE_CONFIRM_NOTE)}<br><br>"
+                    "Продолжить?"
+                    "</div>"
+                )
+            else:
+                text = text.replace(
+                    "\n\nПродолжить?",
+                    f"\n\n{UPDATE_CONFIRM_NOTE}\n\nПродолжить?",
+                )
+
+            box = QMessageBox(parent)
+            box.setWindowTitle(title)
+            box.setIcon(QMessageBox.Question)
+            box.setTextFormat(Qt.RichText)
+            box.setText(text)
+            app = QApplication.instance()
+            base_style = app.styleSheet() if app is not None else ""
+            if not base_style:
+                base_style = getattr(app_module, "DARK_QSS", "")
+            box.setStyleSheet(
+                base_style
+                + """
+                QMessageBox { background: #171a21; }
+                QMessageBox QLabel { color: #e8eaf0; }
+                QMessageBox QPushButton {
+                    min-width: 120px;
+                    text-align: center;
+                    font-size: 10pt;
+                    font-weight: 600;
+                }
+                """
+            )
+            yes_button = box.addButton("Продолжить", QMessageBox.YesRole)
+            box.addButton("Отмена", QMessageBox.NoRole)
+            box.setDefaultButton(yes_button)
+            box.exec()
+            if box.clickedButton() is yes_button:
+                return QMessageBox.Yes
+            return QMessageBox.No
 
         QMessageBox.question = question
         try:
