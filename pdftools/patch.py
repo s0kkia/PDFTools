@@ -4,6 +4,7 @@ import os
 import random
 import shutil
 import sqlite3
+from html import escape
 from pathlib import Path
 
 import pymupdf as fitz
@@ -615,6 +616,12 @@ def _patch_app():
     original_update_download_finished = (
         update_dialog.on_download_finished if update_dialog is not None else None
     )
+    original_update_dialog_init = (
+        update_dialog.__init__ if update_dialog is not None else None
+    )
+    original_update_dialog_on_release = (
+        update_dialog.on_release if update_dialog is not None else None
+    )
 
     class _RepairWorker(QThread):
         finished_result = Signal(object, object)
@@ -1008,15 +1015,50 @@ def _patch_app():
                 except Exception:
                     pass
 
+    def update_dialog_init(self, *args, **kwargs):
+        original_update_dialog_init(self, *args, **kwargs)
+        self.setMinimumWidth(620)
+        self.setMinimumHeight(360)
+        self.status.setWordWrap(True)
+        self.detail.setWordWrap(True)
+        self.detail.setMinimumHeight(110)
+        self.resize(620, 360)
+
+    def update_dialog_on_release(self, result):
+        original_update_dialog_on_release(self, result)
+        phrase = "Настройки, история и библиотека штампов сохраняются."
+        text = self.detail.text()
+        if phrase in text:
+            text = escape(text).replace(
+                escape(phrase), f"<b>{escape(phrase)}</b>"
+            )
+            self.detail.setTextFormat(Qt.RichText)
+            self.detail.setText(text)
+        self.setMinimumWidth(620)
+        self.setMinimumHeight(360)
+        self.resize(620, 360)
+
     def on_download_finished(self, result):
         original_question = QMessageBox.question
 
         def question(parent, title, text, *args, **kwargs):
             if isinstance(text, str) and "Архив загружен и SHA256 совпадает." in text:
-                text = text.replace(
-                    "\n\nПродолжить?",
-                    f"\n\n{UPDATE_CONFIRM_NOTE}\n\nПродолжить?",
-                )
+                prefix = "Архив загружен и SHA256 совпадает.\n\nФайл: "
+                if text.startswith(prefix):
+                    archive = text[len(prefix):].split("\n\nПродолжить?")[0]
+                    text = (
+                        "<div style='font-size:14pt; font-weight:600;'>"
+                        "Архив загружен и SHA256 совпадает.<br><br>"
+                        f"Файл: {escape(archive)}<br><br>"
+                        f"{escape(UPDATE_CONFIRM_NOTE)}<br><br>"
+                        "Продолжить?"
+                        "</div>"
+                    )
+                else:
+                    text = text.replace(
+                        "\n\nПродолжить?",
+                        f"\n\n{UPDATE_CONFIRM_NOTE}\n\nПродолжить?",
+                    )
             return original_question(parent, title, text, *args, **kwargs)
 
         QMessageBox.question = question
@@ -1031,6 +1073,8 @@ def _patch_app():
     MainWindow.run_repair = run_repair
     MainWindow.write_log = write_log
     if update_dialog is not None:
+        update_dialog.__init__ = update_dialog_init
+        update_dialog.on_release = update_dialog_on_release
         update_dialog.on_download_finished = on_download_finished
     StampEditorDialog.save_copy = save_copy
     StampEditorDialog.save_overwrite = save_overwrite
