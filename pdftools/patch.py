@@ -23,12 +23,13 @@ from PySide6.QtWidgets import (
     QVBoxLayout,
 )
 
+import pdftools as pdftools_module
 import pdftools.app as app_module
 from pdftools.app import MainWindow, StampEditorDialog
 from pdftools.core import history as history_module
 from pdftools.core import operations as operations_module
 
-app_module.__version__ = "2.0.4"
+app_module.__version__ = pdftools_module.__version__
 
 UPDATE_CONFIRM_NOTE = (
     "После обновления приложение будет перезагружаться. Это может занять "
