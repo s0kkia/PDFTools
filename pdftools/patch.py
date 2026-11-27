@@ -29,7 +29,9 @@ from pdftools.app import MainWindow, StampEditorDialog
 from pdftools.core import history as history_module
 from pdftools.core import operations as operations_module
 
-app_module.__version__ = pdftools_module.__version__
+app_module.__version__ = getattr(
+    pdftools_module, "__version__", app_module.__version__
+)
 
 UPDATE_CONFIRM_NOTE = (
     "После обновления приложение будет перезагружаться. Это может занять "
