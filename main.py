@@ -19,6 +19,7 @@ def main() -> None:
     from pdftools.ui.theme import DARK_QSS
     app.setStyleSheet(DARK_QSS)
     from pdftools.app import MainWindow
+    import pdftools.patch  # noqa: F401
 
     window = MainWindow()
     window.show()
